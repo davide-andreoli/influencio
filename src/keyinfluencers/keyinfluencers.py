@@ -8,6 +8,8 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import train_test_split
 import shap
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 class KeyInfluencers():
 
@@ -20,6 +22,7 @@ class KeyInfluencers():
         self.explainer = None
         self.feature_names = None
         self.shap_values = None
+        self.target_type = None
     
     def fit(self):
         
@@ -47,11 +50,11 @@ class KeyInfluencers():
             ('numerical', numerical_pipeline, numerical_columns)
         ])
 
-        target_type = self._determine_column_type(y)
+        self.target_type = self._determine_column_type(y)
 
         # X_train, X_test, y_train, y_test = train_test_split(X, y)
         # TODO: Add automatic model choice based on performance
-        if target_type == 'categorical':
+        if self.target_type == 'categorical':
             predictor = LogisticRegression(solver='lbfgs', max_iter=1000)
         else:
             predictor = LinearRegression()
@@ -64,9 +67,8 @@ class KeyInfluencers():
         self.model_pipeline.fit(X, y)
 
         self.feature_names = self.model_pipeline.named_steps['preprocessor'].get_feature_names_out()
-        self.explainer = shap.Explainer(self.model_pipeline.named_steps['predictor'], self.model_pipeline.named_steps['preprocessor'].transform(X))
+        self.explainer = shap.Explainer(self.model_pipeline.named_steps['predictor'], self.model_pipeline.named_steps['preprocessor'].transform(X), feature_names=self.feature_names)
         self.shap_values = self.explainer(self.model_pipeline.named_steps['preprocessor'].transform(X))
-        # Use shap to extract feature importance
 
     def _determine_column_type(self, column: pd.Series):
         #TODO: make this an enum
