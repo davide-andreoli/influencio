@@ -3,8 +3,9 @@ import matplotlib.pyplot as plt
 from typing import List
 import plotly.express as px
 import pandas as pd
+import plotly.graph_objects as go
 
-def plot_feature_importance(shap_values, feature_names: List[str], class_names: List[str],  max_display=10):
+def plot_global_feature_importance(shap_values, feature_names: List[str], class_names: List[str],  max_display=10):
     feature_class_importance = np.sum(np.abs(shap_values.values), axis=0)
     total_importance = np.sum(feature_class_importance, axis=1)
     sorted_indices = np.argsort(-total_importance)
@@ -32,40 +33,21 @@ def plot_feature_importance(shap_values, feature_names: List[str], class_names: 
     )
     fig.show()
 
+def plot_local_feature_importance(shap_values, feature_names: List[str], max_display=10):
 
-
-
-
-def plot_feature_importance_legacy(shap_values, feature_names: List[str], class_names: List[str],  max_display=10):
-    feature_class_importance = np.sum(np.abs(shap_values.values), axis=0)
-    total_importance = np.sum(feature_class_importance, axis=1)
-    sorted_indices = np.argsort(-total_importance)
-
-    feature_class_importance = feature_class_importance[sorted_indices]
+    sorted_indices = np.argsort(-np.abs(shap_values))
+    feature_class_importance = shap_values[sorted_indices]
     feature_names_sorted = [feature_names[i] for i in sorted_indices]
+    #TODO: Plot local feature importance using a plotly waterfall plot
 
-    #TODO: limit to max_display features   
+    fig = go.Figure(go.Waterfall(
+        name = "Feature Importance for Class", orientation = "h", 
+        measure = ["relative" for _ in feature_class_importance],
+        y = feature_names_sorted,
+        x = feature_class_importance,
+        connector = {"mode":"between", "line":{"width":4, "color":"rgb(0, 0, 0)", "dash":"solid"}}
+    ))
 
+    fig.update_layout(title = "Feature Importance for Class")
 
-    x = np.arange(len(feature_names))
-    bottom = np.zeros(len(feature_names))
-
-    #TODO: plot using seaborn or plotly for better aesthetics
-    plt.figure(figsize=(10, 6))
-
-    for class_idx in range(len(class_names)):
-        values = feature_class_importance[:, class_idx]
-        plt.bar(
-            x,
-            values,
-            bottom=bottom,
-            label=class_names[class_idx]
-        )
-        bottom += values  
-
-    plt.xticks(x, feature_names_sorted, rotation=45)
-    plt.ylabel("Total SHAP Importance")
-    plt.title("Stacked Feature Importances by Class (SHAP)")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    fig.show()

@@ -8,7 +8,7 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import train_test_split
 import shap
-from .visualizations import plot_feature_importance
+from .visualizations import plot_global_feature_importance, plot_local_feature_importance
 
 class KeyInfluencers():
 
@@ -75,7 +75,14 @@ class KeyInfluencers():
 
     def global_feature_importance(self, max_display=10):
 
-        plot_feature_importance(self.shap_values, max_display=max_display, feature_names=self.feature_names, class_names=self.class_names)
+        plot_global_feature_importance(self.shap_values, max_display=max_display, feature_names=self.feature_names, class_names=self.class_names)
+
+    def local_feature_importance(self, index: int,  class_index: int, max_display=10):
+
+        #TODO: Add check for index and class_index
+        #TODO: Gracefully handle class index for regression
+        shap_values = self.shap_values.values[index, :, class_index]
+        plot_local_feature_importance(shap_values, max_display=max_display, feature_names=self.feature_names)
 
     def _determine_column_type(self, column: pd.Series):
         #TODO: make this an enum
