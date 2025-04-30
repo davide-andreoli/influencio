@@ -8,8 +8,7 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import train_test_split
 import shap
-import matplotlib.pyplot as plt
-import seaborn as sns
+from .visualizations import plot_feature_importance
 
 class KeyInfluencers():
 
@@ -67,8 +66,16 @@ class KeyInfluencers():
         self.model_pipeline.fit(X, y)
 
         self.feature_names = self.model_pipeline.named_steps['preprocessor'].get_feature_names_out()
-        self.explainer = shap.Explainer(self.model_pipeline.named_steps['predictor'], self.model_pipeline.named_steps['preprocessor'].transform(X), feature_names=self.feature_names)
+        if self.target_type == 'categorical':
+            self.class_names = self.model_pipeline.named_steps['predictor'].classes_
+        else:
+            self.class_names = None
+        self.explainer = shap.Explainer(self.model_pipeline.named_steps['predictor'], self.model_pipeline.named_steps['preprocessor'].transform(X), feature_names=self.feature_names, output_names=self.class_names)
         self.shap_values = self.explainer(self.model_pipeline.named_steps['preprocessor'].transform(X))
+
+    def global_feature_importance(self, max_display=10):
+
+        plot_feature_importance(self.shap_values, max_display=max_display, feature_names=self.feature_names, class_names=self.class_names)
 
     def _determine_column_type(self, column: pd.Series):
         #TODO: make this an enum
