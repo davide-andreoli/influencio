@@ -8,7 +8,7 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import train_test_split
 import shap
-from .visualizations import plot_global_feature_importance, plot_local_feature_importance
+from .visualizations import plot_global_feature_importance, plot_local_feature_importance, plot_segments_tree
 
 class KeyInfluencers():
 
@@ -55,15 +55,23 @@ class KeyInfluencers():
         # TODO: Add automatic model choice based on performance
         if self.target_type == 'categorical':
             predictor = LogisticRegression(solver='lbfgs', max_iter=1000)
+            tree_predictor = DecisionTreeClassifier(max_depth=3)
         else:
             predictor = LinearRegression()
+            tree_predictor = DecisionTreeRegressor(max_depth=3)
 
         self.model_pipeline = Pipeline([
             ('preprocessor', preprocessor),
             ('predictor', predictor)
         ])
 
+        self.tree_pipeline = Pipeline([
+            ('preprocessor', preprocessor),
+            ('tree', tree_predictor)
+        ])
+
         self.model_pipeline.fit(X, y)
+        self.tree_pipeline.fit(X, y)
 
         self.feature_names = self.model_pipeline.named_steps['preprocessor'].get_feature_names_out()
         if self.target_type == 'categorical':
@@ -77,12 +85,24 @@ class KeyInfluencers():
 
         plot_global_feature_importance(self.shap_values, max_display=max_display, feature_names=self.feature_names, class_names=self.class_names)
 
-    def local_feature_importance(self, index: int,  class_index: int, max_display=10):
+    def local_feature_importance(self, index: int, max_display=10):
 
-        #TODO: Add check for index and class_index
-        #TODO: Gracefully handle class index for regression
-        shap_values = self.shap_values.values[index, :, class_index]
+        if index < 0 or index >= len(self.dataframe):
+            raise IndexError("Index out of range for the dataframe.")
+
+        if self.target_type == 'categorical':
+            predicted_probabilities = self.model_pipeline.predict_proba(self.dataframe.drop(self.target, axis=1).iloc[index:index+1])
+            predicted_class_index = np.argmax(predicted_probabilities)
+            shap_values = self.shap_values.values[index, :, predicted_class_index]
+        else:
+            #TODO: Add support for regression
+            shap_values = self.shap_values.values[index]
+
         plot_local_feature_importance(shap_values, max_display=max_display, feature_names=self.feature_names)
+
+    def plot_segments(self):
+        tree = self.tree_pipeline.named_steps['tree']
+        plot_segments_tree(tree, self.feature_names, self.target)
 
     def _determine_column_type(self, column: pd.Series):
         #TODO: make this an enum

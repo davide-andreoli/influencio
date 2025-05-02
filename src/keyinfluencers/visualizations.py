@@ -33,12 +33,18 @@ def plot_global_feature_importance(shap_values, feature_names: List[str], class_
     )
     fig.show()
 
-def plot_local_feature_importance(shap_values, feature_names: List[str], max_display=10):
+def plot_local_feature_importance(shap_values, feature_names: List[str], max_display=10, class_name=None):
+
+    graph_title = "Local Feature Importance" if class_name is None else f"Local Feature Importance for Class {class_name}"
 
     sorted_indices = np.argsort(-np.abs(shap_values))
     feature_class_importance = shap_values[sorted_indices]
     feature_names_sorted = [feature_names[i] for i in sorted_indices]
-    #TODO: Plot local feature importance using a plotly waterfall plot
+    #TODO: Condense features into one feature if the feature number is > than max_display
+    if max_display is not None and max_display < len(feature_names_sorted):
+        remaining_features = feature_class_importance[max_display:]
+        feature_class_importance = np.concatenate((feature_class_importance[:max_display], [np.sum(remaining_features)]))
+        feature_names_sorted = feature_names_sorted[:max_display] + ["Other"]
 
     fig = go.Figure(go.Waterfall(
         name = "Feature Importance for Class", orientation = "h", 
@@ -48,6 +54,6 @@ def plot_local_feature_importance(shap_values, feature_names: List[str], max_dis
         connector = {"mode":"between", "line":{"width":4, "color":"rgb(0, 0, 0)", "dash":"solid"}}
     ))
 
-    fig.update_layout(title = "Feature Importance for Class")
+    fig.update_layout(title = graph_title)
 
     fig.show()
