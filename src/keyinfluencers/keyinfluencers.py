@@ -8,7 +8,7 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import train_test_split
 import shap
-from .visualizations import plot_global_feature_importance, plot_local_feature_importance, plot_segments_tree
+from .visualizations import plot_global_feature_importance, plot_local_feature_importance
 
 class KeyInfluencers():
 
