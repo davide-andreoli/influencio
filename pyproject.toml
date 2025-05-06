@@ -1,5 +1,5 @@
 [project]
-name = "keyinfluencers"
+name = "influencio"
 version = "0.1.0"
 description = ""
 authors = [
@@ -17,11 +17,12 @@ dependencies = [
 ]
 
 [tool.poetry]
-packages = [{include = "keyinfluencers", from = "src"}]
+packages = [{include = "influencio", from = "src"}]
 
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
+pre-commit = "^4.2.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
