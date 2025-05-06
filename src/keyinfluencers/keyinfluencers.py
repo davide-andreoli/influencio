@@ -9,6 +9,7 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import train_test_split
 import shap
 from .visualizations import plot_global_feature_importance, plot_local_feature_importance
+from .tree import extract_feature_contributions, extract_tree_rules, extract_tree_insights
 
 class KeyInfluencers():
 
@@ -100,10 +101,6 @@ class KeyInfluencers():
 
         plot_local_feature_importance(shap_values, max_display=max_display, feature_names=self.feature_names)
 
-    def plot_segments(self):
-        tree = self.tree_pipeline.named_steps['tree']
-        plot_segments_tree(tree, self.feature_names, self.target)
-
     def _determine_column_type(self, column: pd.Series):
         #TODO: make this an enum
         if column.dtype in ['object', 'category', 'bool'] or len(column.unique()) <= 10:
@@ -112,3 +109,26 @@ class KeyInfluencers():
             return 'time'
         else:
             return 'numerical'
+        
+    def key_segments(self, top_n=5, focus_class=None):
+           
+        if self.target_type == 'categorical':
+            y = self.dataframe[self.target]
+            class_counts = y.value_counts()
+            if focus_class is None:
+                focus_class = class_counts.idxmax()
+            focus_class_index = list(self.class_names).index(focus_class)
+            overall_mean = (y == focus_class).mean()
+            tree = self.tree_pipeline[-1]
+            feature_contributions = extract_feature_contributions(tree, self.feature_names)
+            rules = extract_tree_rules(tree, self.feature_names)
+            insights = extract_tree_insights(tree, self.feature_names, overall_mean, 'classification', top_n=top_n, focus_class_index=focus_class_index, focus_class=focus_class)
+        else:
+            y = self.dataframe[self.target]
+            overall_mean = y.mean()
+            tree = self.tree_pipeline[-1]
+            feature_contributions = extract_feature_contributions(tree, self.feature_names)
+            rules = extract_tree_rules(tree, self.feature_names)
+            insights = extract_tree_insights(tree, self.feature_names, overall_mean, 'regression', top_n=top_n, target=self.target)
+
+        return feature_contributions, rules, insights
