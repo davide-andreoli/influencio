@@ -111,7 +111,7 @@ class KeyInfluencers:
             self.model_pipeline.named_steps["preprocessor"].transform(X)
         )
 
-    def global_feature_importance(self, max_display=10):
+    def global_feature_importance(self, max_display: int = 10):
         plot_global_feature_importance(
             self.shap_values,
             max_display=max_display,
@@ -119,7 +119,7 @@ class KeyInfluencers:
             class_names=self.class_names,
         )
 
-    def local_feature_importance(self, index: int, max_display=10):
+    def local_feature_importance(self, index: int, max_display: int = 10):
         if index < 0 or index >= len(self.dataframe):
             raise IndexError("Index out of range for the dataframe.")
 
@@ -146,7 +146,7 @@ class KeyInfluencers:
         else:
             return "numerical"
 
-    def key_segments(self, top_n=5, focus_class=None):
+    def key_segments(self, top_n: int = 5, focus_class: str = None):
         if self.target_type == "categorical":
             y = self.dataframe[self.target]
             class_counts = y.value_counts()

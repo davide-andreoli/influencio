@@ -1,12 +1,11 @@
-from sklearn.tree import _tree
+from sklearn.tree import _tree, DecisionTreeClassifier, DecisionTreeRegressor
+from typing import Union, List
 
 
 class DecisionTreeRule:
-    def __init__(self, feature, threshold, left, right, depth, impurity):
+    def __init__(self, feature: str, threshold: float, depth: int, impurity: float):
         self.feature = feature
         self.threshold = threshold
-        self.left = left
-        self.right = right
         self.depth = depth
         self.impurity = impurity
 
@@ -17,13 +16,13 @@ class DecisionTreeRule:
 class DecisionTreeInsight:
     def __init__(
         self,
-        rule,
-        segment_metric,
-        overall_metric,
-        metric,
-        lift_pct,
-        sample_size,
-        target,
+        rule: str,
+        segment_metric: float,
+        overall_metric: float,
+        metric: str,
+        lift_pct: float,
+        sample_size: float,
+        target: str,
     ):
         self.rule = rule
         self.segment_metric = segment_metric
@@ -41,7 +40,9 @@ class DecisionTreeInsight:
         )
 
 
-def extract_tree_rules(tree, feature_names):
+def extract_tree_rules(
+    tree: Union[DecisionTreeClassifier, DecisionTreeRegressor], feature_names: List[str]
+):
     tree_ = tree.tree_
     feature_name = [
         feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
@@ -50,27 +51,28 @@ def extract_tree_rules(tree, feature_names):
 
     rules = []
 
-    def traverse_tree(node, depth):
+    def traverse_tree(node: int, depth: int):
         if tree_.feature[node] != _tree.TREE_UNDEFINED:
             name = feature_name[node]
             threshold = tree_.threshold[node]
 
-            left_child = traverse_tree(tree_.children_left[node], depth + 1)
-            right_child = traverse_tree(tree_.children_right[node], depth + 1)
+            traverse_tree(tree_.children_left[node], depth + 1)
+            traverse_tree(tree_.children_right[node], depth + 1)
 
-            rule = DecisionTreeRule(
-                name, threshold, left_child, right_child, depth, tree_.impurity[node]
-            )
+            rule = DecisionTreeRule(name, threshold, depth, tree_.impurity[node])
             rules.append(rule)
-            return rule
+            # return rule
         else:
-            return None
+            pass
+            # return None
 
     traverse_tree(0, 0)
     return rules
 
 
-def extract_feature_contributions(tree, feature_names):
+def extract_feature_contributions(
+    tree: Union[DecisionTreeClassifier, DecisionTreeRegressor], feature_names: List[str]
+):
     tree_ = tree.tree_
 
     feature_importances = tree_.compute_feature_importances()
@@ -86,19 +88,19 @@ def extract_feature_contributions(tree, feature_names):
 
 
 def extract_tree_insights(
-    tree,
-    feature_names,
-    overall_metric,
-    tree_type,
-    top_n=5,
-    target=None,
-    focus_class_index=None,
-    focus_class=None,
+    tree: Union[DecisionTreeClassifier, DecisionTreeRegressor],
+    feature_names: List[str],
+    overall_metric: float,
+    tree_type: str,
+    top_n: int = 5,
+    target: str = None,
+    focus_class_index: int = None,
+    focus_class: str = None,
 ):
     tree_ = tree.tree_
     insights = []
 
-    def traverse_tree(node, path):
+    def traverse_tree(node: int, path: List[str]):
         if tree_.feature[node] != _tree.TREE_UNDEFINED:
             name = feature_names[tree_.feature[node]]
             threshold = tree_.threshold[node]
