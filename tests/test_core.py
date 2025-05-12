@@ -32,7 +32,7 @@ def test_key_influencers_initialization_with_classification_data(
     assert key_influencers.target == target_column
     assert key_influencers.model_pipeline is None
     assert key_influencers.explainer is None
-    assert key_influencers.feature_names is None
+    assert key_influencers.transformed_feature_names is None
     assert key_influencers.shap_values is None
     assert key_influencers.target_type is None
 
@@ -44,6 +44,6 @@ def test_key_influencers_initialization_with_regression_data(sample_regression_d
     assert key_influencers.target == target_column
     assert key_influencers.model_pipeline is None
     assert key_influencers.explainer is None
-    assert key_influencers.feature_names is None
+    assert key_influencers.transformed_feature_names is None
     assert key_influencers.shap_values is None
     assert key_influencers.target_type is None

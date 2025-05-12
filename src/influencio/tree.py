@@ -1,5 +1,6 @@
 from sklearn.tree import _tree, DecisionTreeClassifier, DecisionTreeRegressor
 from typing import Union, List
+from .enums import TreeType
 
 
 class DecisionTreeRule:
@@ -91,7 +92,7 @@ def extract_tree_insights(
     tree: Union[DecisionTreeClassifier, DecisionTreeRegressor],
     feature_names: List[str],
     overall_metric: float,
-    tree_type: str,
+    tree_type: TreeType,
     top_n: int = 5,
     target: str = None,
     focus_class_index: int = None,
@@ -115,7 +116,7 @@ def extract_tree_insights(
             value = tree_.value[node][0]
             segment_metric = (
                 value[0] / samples
-                if tree_type == "regression"
+                if tree_type == TreeType.REGRESSION
                 else value[focus_class_index] / value.sum()
             )
             lift = (segment_metric - overall_metric) / overall_metric
@@ -124,7 +125,9 @@ def extract_tree_insights(
                     rule=" AND ".join(path),
                     segment_metric=segment_metric,
                     overall_metric=overall_metric,
-                    metric="likelihood" if tree_type == "classification" else "value",
+                    metric="likelihood"
+                    if tree_type == TreeType.CLASSIFICATION
+                    else "value",
                     lift_pct=lift * 100,
                     sample_size=samples,
                     target=focus_class if focus_class is not None else target,

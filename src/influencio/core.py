@@ -16,6 +16,7 @@ from .tree import (
     extract_tree_rules,
     extract_tree_insights,
 )
+from .enums import ColumnType, TreeType
 
 
 class KeyInfluencers:
@@ -25,7 +26,8 @@ class KeyInfluencers:
 
         self.model_pipeline = None
         self.explainer = None
-        self.feature_names = None
+        self.input_feature_names = dataframe.drop(target, axis=1).columns
+        self.transformed_feature_names = None
         self.shap_values = None
         self.target_type = None
 
@@ -36,17 +38,17 @@ class KeyInfluencers:
         categorical_columns = [
             column
             for column in X.columns
-            if self._determine_column_type(X[column]) == "categorical"
+            if self._determine_column_type(X[column]) == ColumnType.CATEGORICAL
         ]
         # time_columns = [
         #    column
         #    for column in X.columns
-        #    if self._determine_column_type(X[column]) == "time"
+        #    if self._determine_column_type(X[column]) == ColumnType.TIME
         # ]
         numerical_columns = [
             column
             for column in X.columns
-            if self._determine_column_type(X[column]) == "numerical"
+            if self._determine_column_type(X[column]) == ColumnType.NUMERICAL
         ]
 
         categorical_pipeline = Pipeline(
@@ -76,7 +78,7 @@ class KeyInfluencers:
 
         # X_train, X_test, y_train, y_test = train_test_split(X, y)
         # TODO: Add automatic model choice based on performance
-        if self.target_type == "categorical":
+        if self.target_type == ColumnType.CATEGORICAL:
             predictor = LogisticRegression(solver="lbfgs", max_iter=1000)
             tree_predictor = DecisionTreeClassifier(max_depth=3)
         else:
@@ -94,17 +96,27 @@ class KeyInfluencers:
         self.model_pipeline.fit(X, y)
         self.tree_pipeline.fit(X, y)
 
-        self.feature_names = self.model_pipeline.named_steps[
+        self.transformed_feature_names = self.model_pipeline.named_steps[
             "preprocessor"
         ].get_feature_names_out()
-        if self.target_type == "categorical":
+        if self.target_type == ColumnType.CATEGORICAL:
             self.class_names = self.model_pipeline.named_steps["predictor"].classes_
         else:
             self.class_names = None
+
+        # TODO: Add option for seeing the shap values for the transformed data
+        # self.explainer = shap.Explainer(
+        #     self.model_pipeline.named_steps["predictor"],
+        #     self.model_pipeline.named_steps["preprocessor"].transform(X),
+        #     feature_names=self.transformed_feature_names,
+        #     output_names=self.class_names,
+        # )
         self.explainer = shap.Explainer(
-            self.model_pipeline.named_steps["predictor"],
-            self.model_pipeline.named_steps["preprocessor"].transform(X),
-            feature_names=self.feature_names,
+            lambda X: self.model_pipeline.predict_proba(X)
+            if self.target_type == ColumnType.CATEGORICAL
+            else self.model_pipeline.predict(X),
+            X,
+            feature_names=self.input_feature_names,
             output_names=self.class_names,
         )
         self.shap_values = self.explainer(
@@ -115,7 +127,7 @@ class KeyInfluencers:
         plot_global_feature_importance(
             self.shap_values,
             max_display=max_display,
-            feature_names=self.feature_names,
+            feature_names=self.input_feature_names,
             class_names=self.class_names,
         )
 
@@ -123,7 +135,7 @@ class KeyInfluencers:
         if index < 0 or index >= len(self.dataframe):
             raise IndexError("Index out of range for the dataframe.")
 
-        if self.target_type == "categorical":
+        if self.target_type == ColumnType.CATEGORICAL:
             predicted_probabilities = self.model_pipeline.predict_proba(
                 self.dataframe.drop(self.target, axis=1).iloc[index : index + 1]
             )
@@ -134,20 +146,24 @@ class KeyInfluencers:
             shap_values = self.shap_values.values[index]
 
         plot_local_feature_importance(
-            shap_values, max_display=max_display, feature_names=self.feature_names
+            shap_values,
+            max_display=max_display,
+            feature_names=self.input_feature_names,
+            class_name=self.class_names[predicted_class_index]
+            if self.target_type == ColumnType.CATEGORICAL
+            else None,
         )
 
-    def _determine_column_type(self, column: pd.Series):
-        # TODO: make this an enum
+    def _determine_column_type(self, column: pd.Series) -> ColumnType:
         if column.dtype in ["object", "category", "bool"] or len(column.unique()) <= 10:
-            return "categorical"
+            return ColumnType.CATEGORICAL
         elif column.dtype == "datetime64":
-            return "time"
+            return ColumnType.TIME
         else:
-            return "numerical"
+            return ColumnType.NUMERICAL
 
     def key_segments(self, top_n: int = 5, focus_class: str = None):
-        if self.target_type == "categorical":
+        if self.target_type == ColumnType.CATEGORICAL:
             y = self.dataframe[self.target]
             class_counts = y.value_counts()
             if focus_class is None:
@@ -156,14 +172,14 @@ class KeyInfluencers:
             overall_mean = (y == focus_class).mean()
             tree = self.tree_pipeline[-1]
             feature_contributions = extract_feature_contributions(
-                tree, self.feature_names
+                tree, self.transformed_feature_names
             )
-            rules = extract_tree_rules(tree, self.feature_names)
+            rules = extract_tree_rules(tree, self.transformed_feature_names)
             insights = extract_tree_insights(
                 tree,
-                self.feature_names,
+                self.transformed_feature_names,
                 overall_mean,
-                "classification",
+                TreeType.CLASSIFICATION,
                 top_n=top_n,
                 focus_class_index=focus_class_index,
                 focus_class=focus_class,
@@ -173,12 +189,12 @@ class KeyInfluencers:
             overall_mean = y.mean()
             tree = self.tree_pipeline[-1]
             feature_contributions = extract_feature_contributions(
-                tree, self.feature_names
+                tree, self.transformed_feature_names
             )
-            rules = extract_tree_rules(tree, self.feature_names)
+            rules = extract_tree_rules(tree, self.transformed_feature_names)
             insights = extract_tree_insights(
                 tree,
-                self.feature_names,
+                self.transformed_feature_names,
                 overall_mean,
                 "regression",
                 top_n=top_n,
