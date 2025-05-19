@@ -39,7 +39,7 @@ But if you lack the time or skills to dive deep into this kind of analysis, Infl
 The interface is pretty simple, you just have to open a Jupyter Notebook, import the library, instantiate a KeyInfluencers object with the dataframe and the name of the target column, and call its fit method
 
 ```python
-from influencio.keyinfluencers import KeyInfluencers
+from influencio.core import KeyInfluencers
 
 ki = KeyInfluencers(df, "target")
 ki.fit()
