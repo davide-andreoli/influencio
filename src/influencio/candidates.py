@@ -56,7 +56,7 @@ REGRESSION_CANDIDATES = {
         RandomForestRegressor(),
         {
             "predictor__n_estimators": [50, 100, 200],
-            "predictor__max_depth": [None, 5, 10],
+            "predictor__max_depth": [None, 3, 5, 10],
             "predictor__min_samples_split": [2, 5, 10],
         },
     ),
