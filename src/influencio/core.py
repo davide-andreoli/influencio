@@ -5,7 +5,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.model_selection import cross_val_score
+from sklearn.base import BaseEstimator
 import shap
 from .visualizations import (
     plot_global_feature_importance,
@@ -17,21 +20,108 @@ from .tree import (
     extract_tree_insights,
 )
 from .enums import ColumnType, TreeType
+from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class KeyInfluencers:
-    def __init__(self, dataframe: pd.DataFrame, target: str):
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+        target: str,
+        model: Optional[BaseEstimator] = None,
+        tree_model: Optional[BaseEstimator] = None,
+    ):
+        """
+        KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
+        It uses SHAP (SHapley Additive exPlanations) values to explain the predictions of a machine learning model.
+        The class supports both classification and regression tasks.
+        Args:
+            dataframe (pd.DataFrame): The input dataframe containing features and target variable.
+            target (str): The name of the target variable in the dataframe.
+            model (Optional[BaseEstimator]): A user-provided machine learning model for prediction. If None, a default model will be selected based on the target type.
+            tree_model (Optional[BaseEstimator]): A user-provided decision tree model for extracting insights. If None, a default decision tree will be used.
+        """
+
         self.dataframe = dataframe
         self.target = target
 
+        self.preprocessor = None
+        self.model = model
+        self.tree_model = tree_model
         self.model_pipeline = None
+        self.tree_pipeline = None
         self.explainer = None
+        self.class_names = None
         self.input_feature_names = dataframe.drop(target, axis=1).columns
         self.transformed_feature_names = None
         self.shap_values = None
         self.target_type = None
 
+    def _select_best_model(
+        self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
+    ) -> BaseEstimator:
+        """
+        Selects the best model for the given target type (classification or regression) based on cross-validation scores between a set of candidate models.
+        Args:
+            X (pd.DataFrame): The input features.
+            y (pd.Series): The target variable.
+            target_type (ColumnType): The type of the target variable (categorical or numerical).
+        Returns:
+            BaseEstimator: The best model selected based on cross-validation scores.
+        """
+        # TODO: Investigate if it makes sense to make this more gneric, acceppting candicates and scoring as parameters
+        if self.model is not None:
+            logger.info("Using user provided model for prediction.")
+            return self.model
+
+        if target_type == ColumnType.CATEGORICAL:
+            candidate_models = {
+                "LogisticRegression": LogisticRegression(solver="lbfgs", max_iter=1000),
+                "RandomForestClassifier": RandomForestClassifier(n_estimators=100),
+            }
+            scoring = "accuracy"
+        else:
+            candidate_models = {
+                "LinearRegression": LinearRegression(),
+                "RandomForestRegressor": RandomForestRegressor(n_estimators=100),
+            }
+            scoring = "r2"
+
+        best_model = None
+        best_score = -float("inf")
+        for name, model in candidate_models.items():
+            pipeline = Pipeline(
+                [
+                    ("preprocessor", self.preprocessor),
+                    ("predictor", model),
+                ]
+            )
+            score = cross_val_score(pipeline, X, y, cv=3, scoring=scoring).mean()
+            if score > best_score:
+                best_score = score
+                best_model = model
+
+        logger.info(
+            f"The model automatically selected is {best_model.__class__.__name__}"
+        )
+        return best_model
+
     def fit(self):
+        """
+        Fits the model pipeline to the provided dataframe and prepares it for predictions and explanations.
+        This method performs the following steps:
+            1. Splits the dataframe into features (X) and target (y)
+            2. Identifies categorical, numerical and time based columns
+            3. Creates a preprocessing pipeline for the features
+            4. If a model is not provided by the user, it selects the best model based on cross-validation scores
+            5. Fits the model pipeline to the data
+            6. Creates a SHAP explainer for the fitted model and computes SHAP values
+        Notes:
+            - Time-based columns are currently not handled and require additional preprocessing.
+        """
         X = self.dataframe.drop(self.target, axis=1)
         y = self.dataframe[self.target]
 
@@ -74,16 +164,20 @@ class KeyInfluencers:
             ]
         )
 
+        self.preprocessor = preprocessor
+
         self.target_type = self._determine_column_type(y)
 
         # X_train, X_test, y_train, y_test = train_test_split(X, y)
         # TODO: Add automatic model choice based on performance
-        if self.target_type == ColumnType.CATEGORICAL:
-            predictor = LogisticRegression(solver="lbfgs", max_iter=1000)
+        if self.target_type == ColumnType.CATEGORICAL and not self.tree_model:
             tree_predictor = DecisionTreeClassifier(max_depth=3)
-        else:
-            predictor = LinearRegression()
+        elif self.target_type == ColumnType.NUMERICAL and not self.tree_model:
             tree_predictor = DecisionTreeRegressor(max_depth=3)
+        else:
+            tree_predictor = self.tree_model
+
+        predictor = self._select_best_model(X, y, self.target_type)
 
         self.model_pipeline = Pipeline(
             [("preprocessor", preprocessor), ("predictor", predictor)]
@@ -124,6 +218,11 @@ class KeyInfluencers:
         )
 
     def global_feature_importance(self, max_display: int = 10):
+        """
+        Plots the global feature importance using SHAP values.
+        Args:
+            max_display (int): The maximum number of features to display in the plot.
+        """
         plot_global_feature_importance(
             self.shap_values,
             max_display=max_display,
@@ -132,6 +231,12 @@ class KeyInfluencers:
         )
 
     def local_feature_importance(self, index: int, max_display: int = 10):
+        """
+        Plots the local feature importance using SHAP values.
+        Args:
+            index (int): The index of the instance for which to plot local feature importance
+            max_display (int): The maximum number of features to display in the plot
+        """
         if index < 0 or index >= len(self.dataframe):
             raise IndexError("Index out of range for the dataframe.")
 
@@ -155,6 +260,13 @@ class KeyInfluencers:
         )
 
     def _determine_column_type(self, column: pd.Series) -> ColumnType:
+        """
+        Determines the type of a column based on its data type and unique values.
+        Args:
+            column (pd.Series): The input column to determine the type
+        Returns:
+            ColumnType: The determined type of the column (categorical, numerical, or time)
+        """
         if column.dtype in ["object", "category", "bool"] or len(column.unique()) <= 10:
             return ColumnType.CATEGORICAL
         elif column.dtype == "datetime64":
