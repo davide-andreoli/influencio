@@ -4,10 +4,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import LogisticRegression, LinearRegression
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, RandomizedSearchCV
 from sklearn.base import BaseEstimator
 import shap
 from .visualizations import (
@@ -19,6 +17,7 @@ from .tree import (
     extract_tree_rules,
     extract_tree_insights,
 )
+from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
 from typing import Optional
 import logging
@@ -61,16 +60,21 @@ class KeyInfluencers:
         self.target_type = None
 
     def _select_best_model(
-        self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        target_type: ColumnType,
+        tuning: bool = True,
     ) -> BaseEstimator:
         """
-        Selects the best model for the given target type (classification or regression) based on cross-validation scores between a set of candidate models.
+        Selects the best model for the given target type (classification or regression) based on cross-validation scores between a set of candidate models and parameter grids.
         Args:
             X (pd.DataFrame): The input features.
             y (pd.Series): The target variable.
             target_type (ColumnType): The type of the target variable (categorical or numerical).
+            tuning (bool): Whether to perform hyperparameter tuning using RandomizedSearchCV.
         Returns:
-            BaseEstimator: The best model selected based on cross-validation scores.
+            BaseEstimator: The best model selected based on cross-validation scores and hyperparameter tuning.
         """
         # TODO: Investigate if it makes sense to make this more gneric, acceppting candicates and scoring as parameters
         if self.model is not None:
@@ -78,34 +82,42 @@ class KeyInfluencers:
             return self.model
 
         if target_type == ColumnType.CATEGORICAL:
-            candidate_models = {
-                "LogisticRegression": LogisticRegression(solver="lbfgs", max_iter=1000),
-                "RandomForestClassifier": RandomForestClassifier(n_estimators=100),
-            }
+            candidate_models = CLASSIFICATION_CANDIDATES
             scoring = "accuracy"
         else:
-            candidate_models = {
-                "LinearRegression": LinearRegression(),
-                "RandomForestRegressor": RandomForestRegressor(n_estimators=100),
-            }
+            candidate_models = REGRESSION_CANDIDATES
             scoring = "r2"
 
         best_model = None
         best_score = -float("inf")
-        for name, model in candidate_models.items():
+        for name, (model, param_grid) in candidate_models.items():
             pipeline = Pipeline(
                 [
                     ("preprocessor", self.preprocessor),
                     ("predictor", model),
                 ]
             )
-            score = cross_val_score(pipeline, X, y, cv=3, scoring=scoring).mean()
-            if score > best_score:
-                best_score = score
-                best_model = model
+
+            if tuning:
+                search = RandomizedSearchCV(
+                    pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
+                )
+                search.fit(X, y)
+
+                if search.best_score_ > best_score:
+                    best_score = search.best_score_
+                    best_model = search.best_estimator_.named_steps["predictor"]
+                    best_parameters = search.best_params_
+            else:
+                scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
+                mean_score = np.mean(scores)
+                if mean_score > best_score:
+                    best_score = mean_score
+                    best_model = model
+                    best_parameters = {}
 
         logger.info(
-            f"The model automatically selected is {best_model.__class__.__name__}"
+            f"The model automatically selected is {best_model.__class__.__name__}, with the parameters {best_parameters} and a cross-validation score of {best_score:.4f}"
         )
         return best_model
 
