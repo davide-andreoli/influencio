@@ -225,9 +225,7 @@ class KeyInfluencers:
             feature_names=self.input_feature_names,
             output_names=self.class_names,
         )
-        self.shap_values = self.explainer(
-            self.model_pipeline.named_steps["preprocessor"].transform(X)
-        )
+        self.shap_values = self.explainer(X)
 
     def global_feature_importance(self, max_display: int = 10):
         """
