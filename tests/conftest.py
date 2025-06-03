@@ -2,6 +2,7 @@ import pytest
 import pandas as pd
 from sklearn.datasets import load_iris, load_diabetes
 from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
 
 
 @pytest.fixture
@@ -29,4 +30,10 @@ def sample_regression_model():
 @pytest.fixture
 def sample_classification_model():
     model = LogisticRegression(max_iter=5)
+    return model
+
+
+@pytest.fixture
+def sample_decision_tree_classifier():
+    model = DecisionTreeClassifier()
     return model

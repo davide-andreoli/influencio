@@ -56,12 +56,18 @@ def test_key_influencers_fit_with_regression_data(
 
 
 def test_key_influencers_with_given_model(
-    sample_classification_data, sample_classification_model
+    sample_classification_data,
+    sample_classification_model,
+    sample_decision_tree_classifier,
 ):
     target_column = "target"
     key_influencers = KeyInfluencers(
-        sample_classification_data, target_column, model=sample_classification_model
+        sample_classification_data,
+        target_column,
+        model=sample_classification_model,
+        tree_model=sample_decision_tree_classifier,
     )
     key_influencers.fit()
 
     assert key_influencers.model == sample_classification_model
+    assert key_influencers.tree_model == sample_decision_tree_classifier
