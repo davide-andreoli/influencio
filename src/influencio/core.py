@@ -32,6 +32,7 @@ class KeyInfluencers:
         target: str,
         model: Optional[BaseEstimator] = None,
         tree_model: Optional[BaseEstimator] = None,
+        tuning: bool = True,
     ):
         """
         KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
@@ -48,6 +49,7 @@ class KeyInfluencers:
         self.target = target
 
         self.preprocessor = None
+        self.tuning = tuning
         self.model = model
         self.tree_model = tree_model
         self.model_pipeline = None
@@ -60,11 +62,7 @@ class KeyInfluencers:
         self.target_type = None
 
     def _select_best_model(
-        self,
-        X: pd.DataFrame,
-        y: pd.Series,
-        target_type: ColumnType,
-        tuning: bool = True,
+        self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
     ) -> BaseEstimator:
         """
         Selects the best model for the given target type (classification or regression) based on cross-validation scores between a set of candidate models and parameter grids.
@@ -98,7 +96,7 @@ class KeyInfluencers:
                 ]
             )
 
-            if tuning:
+            if self.tuning:
                 search = RandomizedSearchCV(
                     pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
                 )
@@ -108,7 +106,8 @@ class KeyInfluencers:
                     best_score = search.best_score_
                     best_model = search.best_estimator_.named_steps["predictor"]
                     best_parameters = search.best_params_
-            else:
+            else:  # pragma: no cover
+                # Performing cross-validation without hyperparameter tuning is not recommended
                 scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
                 mean_score = np.mean(scores)
                 if mean_score > best_score:
