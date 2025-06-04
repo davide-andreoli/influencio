@@ -33,6 +33,7 @@ class KeyInfluencers:
         model: Optional[BaseEstimator] = None,
         tree_model: Optional[BaseEstimator] = None,
         tuning: bool = True,
+        tuning_candidates: Optional[dict] = None,
     ):
         """
         KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
@@ -50,6 +51,7 @@ class KeyInfluencers:
 
         self.preprocessor = None
         self.tuning = tuning
+        self.tuning_candidates = tuning_candidates
         self.model = model
         self.tree_model = tree_model
         self.model_pipeline = None
@@ -80,10 +82,18 @@ class KeyInfluencers:
             return self.model
 
         if target_type == ColumnType.CATEGORICAL:
-            candidate_models = CLASSIFICATION_CANDIDATES
+            candidate_models = (
+                CLASSIFICATION_CANDIDATES
+                if not self.tuning_candidates
+                else self.tuning_candidates
+            )
             scoring = "accuracy"
-        else:
-            candidate_models = REGRESSION_CANDIDATES
+        elif target_type == ColumnType.NUMERICAL:
+            candidate_models = (
+                REGRESSION_CANDIDATES
+                if not self.tuning_candidates
+                else self.tuning_candidates
+            )
             scoring = "r2"
 
         best_model = None
@@ -278,8 +288,10 @@ class KeyInfluencers:
         """
         if column.dtype in ["object", "category", "bool"] or len(column.unique()) <= 10:
             return ColumnType.CATEGORICAL
-        elif column.dtype == "datetime64":
-            return ColumnType.TIME
+        elif (
+            column.dtype == "datetime64"
+        ):  # TODO: probably better to use pd.api.types.is_datetime64_any_dtype
+            return ColumnType.TIME  # pragma: no cover
         else:
             return ColumnType.NUMERICAL
 
