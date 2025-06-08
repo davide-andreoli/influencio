@@ -67,3 +67,19 @@ def fake_plot_global_feature_importance(monkeypatch):
 
     monkeypatch.setattr(influencio.core, "plot_global_feature_importance", fake_plot)
     return called
+
+
+@pytest.fixture
+def fake_plot_local_feature_importance(monkeypatch):
+    called = {}
+
+    def fake_plot(shap_values, max_display, feature_names, class_name):
+        called["shap_values"] = shap_values
+        called["max_display"] = max_display
+        called["feature_names"] = feature_names
+        called["class_name"] = class_name
+
+    import influencio.core
+
+    monkeypatch.setattr(influencio.core, "plot_local_feature_importance", fake_plot)
+    return called
