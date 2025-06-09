@@ -7,7 +7,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import cross_val_score, RandomizedSearchCV
 from sklearn.base import BaseEstimator
-import shap
+from shap import Explainer
+from shap._explanation import Explanation
 from .visualizations import (
     plot_global_feature_importance,
     plot_local_feature_importance,
@@ -34,7 +35,9 @@ class KeyInfluencers:
         model: Optional[BaseEstimator] = None,
         tree_model: Optional[BaseEstimator] = None,
         tuning: bool = True,
-        tuning_candidates: Optional[dict] = None,
+        tuning_candidates: Optional[
+            Dict[str, Tuple[BaseEstimator, Dict[str, Any]]]
+        ] = None,
     ):
         """
         KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
@@ -50,19 +53,23 @@ class KeyInfluencers:
         self.dataframe = dataframe
         self.target = target
 
-        self.preprocessor = None
-        self.tuning = tuning
-        self.tuning_candidates = tuning_candidates
-        self.model = model
-        self.tree_model = tree_model
-        self.model_pipeline = None
-        self.tree_pipeline = None
-        self.explainer = None
-        self.class_names = None
-        self.input_feature_names = dataframe.drop(target, axis=1).columns
-        self.transformed_feature_names = None
-        self.shap_values = None
-        self.target_type = None
+        self.preprocessor: Optional[ColumnTransformer] = None
+        self.tuning: bool = tuning
+        self.tuning_candidates: Optional[
+            Dict[str, Tuple[BaseEstimator, Dict[str, Any]]]
+        ] = tuning_candidates
+        self.model: Optional[BaseEstimator] = model
+        self.tree_model: Optional[BaseEstimator] = tree_model
+        self.model_pipeline: Optional[Pipeline] = None
+        self.tree_pipeline: Optional[Pipeline] = None
+        self.explainer: Optional[Explainer] = None
+        self.class_names: Optional[List[str]] = None
+        self.input_feature_names: List[str] = dataframe.drop(
+            target, axis=1
+        ).columns.to_list()
+        self.transformed_feature_names: Optional[List[str]] = None
+        self.shap_values: Optional[Explanation] = None
+        self.target_type: Optional[ColumnType] = None
 
     def _evaluate_model(
         self,
@@ -87,14 +94,14 @@ class KeyInfluencers:
             search.fit(X, y)
             return (
                 search.best_score_,
-                search.best_estimator_.named_steps["predictor"],
+                search.best_estimator_.named_steps["predictor"],  # type: ignore
                 search.best_params_,
                 name,
             )
         else:
             scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
             return (
-                np.mean(scores),
+                float(np.mean(scores)),
                 model,
                 {},
                 name,
@@ -132,6 +139,10 @@ class KeyInfluencers:
                 else self.tuning_candidates
             )
             scoring = "r2"
+        else:
+            raise ValueError(
+                "Unsupported target type. Only categorical and numerical targets are supported."
+            )
 
         best_model = None
         best_score = -float("inf")
@@ -244,17 +255,10 @@ class KeyInfluencers:
         else:
             self.class_names = None
 
-        # TODO: Add option for seeing the shap values for the transformed data
-        # self.explainer = shap.Explainer(
-        #     self.model_pipeline.named_steps["predictor"],
-        #     self.model_pipeline.named_steps["preprocessor"].transform(X),
-        #     feature_names=self.transformed_feature_names,
-        #     output_names=self.class_names,
-        # )
-        self.explainer = shap.Explainer(
-            lambda X: self.model_pipeline.predict_proba(X)
+        self.explainer = Explainer(
+            lambda X: self.model_pipeline.predict_proba(X)  # type: ignore
             if self.target_type == ColumnType.CATEGORICAL
-            else self.model_pipeline.predict(X),
+            else self.model_pipeline.predict(X),  # type: ignore
             X,
             feature_names=self.input_feature_names,
             output_names=self.class_names,
@@ -285,7 +289,7 @@ class KeyInfluencers:
             raise IndexError("Index out of range for the dataframe.")
 
         if self.target_type == ColumnType.CATEGORICAL:
-            predicted_probabilities = self.model_pipeline.predict_proba(
+            predicted_probabilities = self.model_pipeline.predict_proba(  # type: ignore
                 self.dataframe.drop(self.target, axis=1).iloc[index : index + 1]
             )
             predicted_class_index = np.argmax(predicted_probabilities)
