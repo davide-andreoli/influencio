@@ -19,8 +19,9 @@ from .tree import (
 )
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
-from typing import Optional
+from typing import cast, Optional, Tuple, Dict, Any, List
 import logging
+from joblib import Parallel, delayed
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,42 @@ class KeyInfluencers:
         self.shap_values = None
         self.target_type = None
 
+    def _evaluate_model(
+        self,
+        X,
+        y,
+        name: str,
+        model: BaseEstimator,
+        scoring: str,
+        param_grid: Dict[str, Any],
+    ) -> Tuple[float, BaseEstimator, Dict[str, Any], str]:  # pragma: no cover
+        pipeline = Pipeline(
+            [
+                ("preprocessor", self.preprocessor),
+                ("predictor", model),
+            ]
+        )
+
+        if self.tuning:
+            search = RandomizedSearchCV(
+                pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
+            )
+            search.fit(X, y)
+            return (
+                search.best_score_,
+                search.best_estimator_.named_steps["predictor"],
+                search.best_params_,
+                name,
+            )
+        else:
+            scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
+            return (
+                np.mean(scores),
+                model,
+                {},
+                name,
+            )
+
     def _select_best_model(
         self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
     ) -> BaseEstimator:
@@ -98,36 +135,23 @@ class KeyInfluencers:
 
         best_model = None
         best_score = -float("inf")
-        # TODO: Check if this can be parallelized
-        for name, (model, param_grid) in candidate_models.items():
-            pipeline = Pipeline(
-                [
-                    ("preprocessor", self.preprocessor),
-                    ("predictor", model),
-                ]
-            )
 
-            if self.tuning:
-                search = RandomizedSearchCV(
-                    pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
-                )
-                search.fit(X, y)
+        tasks = [
+            delayed(self._evaluate_model)(X, y, name, model, scoring, param_grid)
+            for name, (model, param_grid) in candidate_models.items()
+        ]
 
-                if search.best_score_ > best_score:
-                    best_score = search.best_score_
-                    best_model = search.best_estimator_.named_steps["predictor"]
-                    best_parameters = search.best_params_
-            else:  # pragma: no cover
-                # Performing cross-validation without hyperparameter tuning is not recommended
-                scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
-                mean_score = np.mean(scores)
-                if mean_score > best_score:
-                    best_score = mean_score
-                    best_model = model
-                    best_parameters = {}
+        results = cast(
+            List[Tuple[float, BaseEstimator, Dict[str, Any], str]],
+            Parallel(n_jobs=-1)(tasks),
+        )
+
+        best_score, best_model, best_parameters, best_name = max(
+            results, key=lambda x: x[0]
+        )
 
         logger.info(
-            f"The model automatically selected is {best_model.__class__.__name__}, with the parameters {best_parameters} and a cross-validation score of {best_score:.4f}"
+            f"The model automatically selected is {best_name}, with the parameters {best_parameters} and a cross-validation score of {best_score:.4f}"
         )
         return best_model
 

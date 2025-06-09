@@ -181,3 +181,60 @@ def test_local_feature_importance_invalid_index(
         key_influencers.local_feature_importance(index=999999, max_display=7)
 
     assert str(e_info.value) == "Index out of range for the dataframe."
+
+
+def test_key_segments_classification_default_focus_class(
+    sample_classification_data, sample_classification_model
+):
+    key_influencers = KeyInfluencers(
+        sample_classification_data, "target", model=sample_classification_model
+    )
+    key_influencers.fit()
+    feature_contributions, rules, insights = key_influencers.key_segments(top_n=3)
+    assert isinstance(feature_contributions, list)
+    assert isinstance(rules, list)
+    assert isinstance(insights, list)
+    assert len(insights) <= 3
+
+
+def test_key_segments_classification_with_focus_class(
+    sample_classification_data, sample_classification_model
+):
+    key_influencers = KeyInfluencers(
+        sample_classification_data, "target", model=sample_classification_model
+    )
+    key_influencers.fit()
+    focus_class = sample_classification_data["target"].unique()[0]
+    feature_contributions, rules, insights = key_influencers.key_segments(
+        top_n=2, focus_class=focus_class
+    )
+    assert isinstance(feature_contributions, list)
+    assert isinstance(rules, list)
+    assert isinstance(insights, list)
+    assert len(insights) <= 2
+
+
+def test_key_segments_regression(sample_regression_data, sample_regression_model):
+    key_influencers = KeyInfluencers(
+        sample_regression_data, "target", model=sample_regression_model
+    )
+    key_influencers.fit()
+    feature_contributions, rules, insights = key_influencers.key_segments(top_n=4)
+    assert isinstance(feature_contributions, list)
+    assert isinstance(rules, list)
+    assert isinstance(insights, list)
+    assert len(insights) <= 4
+
+
+def test_key_segments_regression_with_target_arg(
+    sample_regression_data, sample_regression_model
+):
+    key_influencers = KeyInfluencers(
+        sample_regression_data, "target", model=sample_regression_model
+    )
+    key_influencers.fit()
+    feature_contributions, rules, insights = key_influencers.key_segments(top_n=1)
+    assert isinstance(feature_contributions, list)
+    assert isinstance(rules, list)
+    assert isinstance(insights, list)
+    assert len(insights) <= 1
