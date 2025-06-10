@@ -7,7 +7,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import cross_val_score, RandomizedSearchCV
 from sklearn.base import BaseEstimator
-import shap
+from shap import Explainer
+from shap._explanation import Explanation
 from .visualizations import (
     plot_global_feature_importance,
     plot_local_feature_importance,
@@ -19,8 +20,9 @@ from .tree import (
 )
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
-from typing import Optional
+from typing import cast, Optional, Tuple, Dict, Any, List
 import logging
+from joblib import Parallel, delayed
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,10 @@ class KeyInfluencers:
         target: str,
         model: Optional[BaseEstimator] = None,
         tree_model: Optional[BaseEstimator] = None,
+        tuning: bool = True,
+        tuning_candidates: Optional[
+            Dict[str, Tuple[BaseEstimator, Dict[str, Any]]]
+        ] = None,
     ):
         """
         KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
@@ -47,24 +53,62 @@ class KeyInfluencers:
         self.dataframe = dataframe
         self.target = target
 
-        self.preprocessor = None
-        self.model = model
-        self.tree_model = tree_model
-        self.model_pipeline = None
-        self.tree_pipeline = None
-        self.explainer = None
-        self.class_names = None
-        self.input_feature_names = dataframe.drop(target, axis=1).columns
-        self.transformed_feature_names = None
-        self.shap_values = None
-        self.target_type = None
+        self.preprocessor: Optional[ColumnTransformer] = None
+        self.tuning: bool = tuning
+        self.tuning_candidates: Optional[
+            Dict[str, Tuple[BaseEstimator, Dict[str, Any]]]
+        ] = tuning_candidates
+        self.model: Optional[BaseEstimator] = model
+        self.tree_model: Optional[BaseEstimator] = tree_model
+        self.model_pipeline: Optional[Pipeline] = None
+        self.tree_pipeline: Optional[Pipeline] = None
+        self.explainer: Optional[Explainer] = None
+        self.class_names: Optional[List[str]] = None
+        self.input_feature_names: List[str] = dataframe.drop(
+            target, axis=1
+        ).columns.to_list()
+        self.transformed_feature_names: Optional[List[str]] = None
+        self.shap_values: Optional[Explanation] = None
+        self.target_type: Optional[ColumnType] = None
+
+    def _evaluate_model(
+        self,
+        X,
+        y,
+        name: str,
+        model: BaseEstimator,
+        scoring: str,
+        param_grid: Dict[str, Any],
+    ) -> Tuple[float, BaseEstimator, Dict[str, Any], str]:  # pragma: no cover
+        pipeline = Pipeline(
+            [
+                ("preprocessor", self.preprocessor),
+                ("predictor", model),
+            ]
+        )
+
+        if self.tuning:
+            search = RandomizedSearchCV(
+                pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
+            )
+            search.fit(X, y)
+            return (
+                search.best_score_,
+                search.best_estimator_.named_steps["predictor"],  # type: ignore
+                search.best_params_,
+                name,
+            )
+        else:
+            scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
+            return (
+                float(np.mean(scores)),
+                model,
+                {},
+                name,
+            )
 
     def _select_best_model(
-        self,
-        X: pd.DataFrame,
-        y: pd.Series,
-        target_type: ColumnType,
-        tuning: bool = True,
+        self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
     ) -> BaseEstimator:
         """
         Selects the best model for the given target type (classification or regression) based on cross-validation scores between a set of candidate models and parameter grids.
@@ -82,42 +126,43 @@ class KeyInfluencers:
             return self.model
 
         if target_type == ColumnType.CATEGORICAL:
-            candidate_models = CLASSIFICATION_CANDIDATES
+            candidate_models = (
+                CLASSIFICATION_CANDIDATES
+                if not self.tuning_candidates
+                else self.tuning_candidates
+            )
             scoring = "accuracy"
-        else:
-            candidate_models = REGRESSION_CANDIDATES
+        elif target_type == ColumnType.NUMERICAL:
+            candidate_models = (
+                REGRESSION_CANDIDATES
+                if not self.tuning_candidates
+                else self.tuning_candidates
+            )
             scoring = "r2"
+        else:
+            raise ValueError(
+                "Unsupported target type. Only categorical and numerical targets are supported."
+            )
 
         best_model = None
         best_score = -float("inf")
-        for name, (model, param_grid) in candidate_models.items():
-            pipeline = Pipeline(
-                [
-                    ("preprocessor", self.preprocessor),
-                    ("predictor", model),
-                ]
-            )
 
-            if tuning:
-                search = RandomizedSearchCV(
-                    pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
-                )
-                search.fit(X, y)
+        tasks = [
+            delayed(self._evaluate_model)(X, y, name, model, scoring, param_grid)
+            for name, (model, param_grid) in candidate_models.items()
+        ]
 
-                if search.best_score_ > best_score:
-                    best_score = search.best_score_
-                    best_model = search.best_estimator_.named_steps["predictor"]
-                    best_parameters = search.best_params_
-            else:
-                scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
-                mean_score = np.mean(scores)
-                if mean_score > best_score:
-                    best_score = mean_score
-                    best_model = model
-                    best_parameters = {}
+        results = cast(
+            List[Tuple[float, BaseEstimator, Dict[str, Any], str]],
+            Parallel(n_jobs=-1)(tasks),
+        )
+
+        best_score, best_model, best_parameters, best_name = max(
+            results, key=lambda x: x[0]
+        )
 
         logger.info(
-            f"The model automatically selected is {best_model.__class__.__name__}, with the parameters {best_parameters} and a cross-validation score of {best_score:.4f}"
+            f"The model automatically selected is {best_name}, with the parameters {best_parameters} and a cross-validation score of {best_score:.4f}"
         )
         return best_model
 
@@ -210,24 +255,15 @@ class KeyInfluencers:
         else:
             self.class_names = None
 
-        # TODO: Add option for seeing the shap values for the transformed data
-        # self.explainer = shap.Explainer(
-        #     self.model_pipeline.named_steps["predictor"],
-        #     self.model_pipeline.named_steps["preprocessor"].transform(X),
-        #     feature_names=self.transformed_feature_names,
-        #     output_names=self.class_names,
-        # )
-        self.explainer = shap.Explainer(
-            lambda X: self.model_pipeline.predict_proba(X)
+        self.explainer = Explainer(
+            lambda X: self.model_pipeline.predict_proba(X)  # type: ignore
             if self.target_type == ColumnType.CATEGORICAL
-            else self.model_pipeline.predict(X),
+            else self.model_pipeline.predict(X),  # type: ignore
             X,
             feature_names=self.input_feature_names,
             output_names=self.class_names,
         )
-        self.shap_values = self.explainer(
-            self.model_pipeline.named_steps["preprocessor"].transform(X)
-        )
+        self.shap_values = self.explainer(X)
 
     def global_feature_importance(self, max_display: int = 10):
         """
@@ -253,7 +289,7 @@ class KeyInfluencers:
             raise IndexError("Index out of range for the dataframe.")
 
         if self.target_type == ColumnType.CATEGORICAL:
-            predicted_probabilities = self.model_pipeline.predict_proba(
+            predicted_probabilities = self.model_pipeline.predict_proba(  # type: ignore
                 self.dataframe.drop(self.target, axis=1).iloc[index : index + 1]
             )
             predicted_class_index = np.argmax(predicted_probabilities)
@@ -281,8 +317,10 @@ class KeyInfluencers:
         """
         if column.dtype in ["object", "category", "bool"] or len(column.unique()) <= 10:
             return ColumnType.CATEGORICAL
-        elif column.dtype == "datetime64":
-            return ColumnType.TIME
+        elif (
+            column.dtype == "datetime64"
+        ):  # TODO: probably better to use pd.api.types.is_datetime64_any_dtype
+            return ColumnType.TIME  # pragma: no cover
         else:
             return ColumnType.NUMERICAL
 
