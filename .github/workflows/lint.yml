@@ -1,0 +1,17 @@
+name: Lint
+
+on:
+    pull_request
+
+jobs:
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - name: Install poetry
+              uses: snok/install-poetry@v1
+            - name: Install package
+              run: poetry install --with dev
+            - name: Run ruff
+              run: poetry run ruff check
