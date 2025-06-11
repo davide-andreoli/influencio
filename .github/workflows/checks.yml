@@ -7,15 +7,23 @@ jobs:
     lint:
         runs-on: ubuntu-latest
         steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-            - name: Install poetry
-              uses: snok/install-poetry@v1
-            - name: Install package
-              run: poetry install --with dev
+            - name: Setup Poetry
+              uses: ./.github/actions/setup-poetry
             - name: Run ruff
               run: poetry run ruff check
+
+    type-check:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Setup Poetry
+              uses: ./.github/actions/setup-poetry
             - name: Run mypy
               run: poetry run mypy src/ tests/
+
+    tests:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Setup Poetry
+              uses: ./.github/actions/setup-poetry
             - name: Test with pytest
               run: poetry run pytest tests/
