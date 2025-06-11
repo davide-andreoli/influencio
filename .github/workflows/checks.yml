@@ -7,6 +7,8 @@ jobs:
     lint:
         runs-on: ubuntu-latest
         steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
             - name: Setup Poetry
               uses: ./.github/actions/setup-poetry
             - name: Run ruff
@@ -15,6 +17,8 @@ jobs:
     type-check:
         runs-on: ubuntu-latest
         steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
             - name: Setup Poetry
               uses: ./.github/actions/setup-poetry
             - name: Run mypy
@@ -23,6 +27,8 @@ jobs:
     tests:
         runs-on: ubuntu-latest
         steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
             - name: Setup Poetry
               uses: ./.github/actions/setup-poetry
             - name: Test with pytest
