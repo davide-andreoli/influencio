@@ -15,3 +15,7 @@ jobs:
               run: poetry install --with dev
             - name: Run ruff
               run: poetry run ruff check
+            - name: Run mypy
+              run: poetry run mypy src/ tests/
+            - name: Test with pytest
+              run: poetry run pytest tests/
