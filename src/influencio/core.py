@@ -359,7 +359,7 @@ class KeyInfluencers:
     def key_segments(
         self, top_n: int = 5, focus_class: Optional[str] = None
     ) -> Tuple[Any, Any, Any]:
-        if not self.tree_pipeline:
+        if not self.tree_pipeline or not self.transformed_feature_names:
             raise NotFittedError(
                 "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
             )
@@ -399,7 +399,7 @@ class KeyInfluencers:
                 tree,
                 self.transformed_feature_names,
                 overall_mean,
-                "regression",
+                TreeType.REGRESSION,
                 top_n=top_n,
                 target=self.target,
             )
