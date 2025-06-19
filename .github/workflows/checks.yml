@@ -9,6 +9,8 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
             - name: Setup Poetry
               uses: ./.github/actions/setup-poetry
             - name: Get changed Python files
@@ -27,6 +29,8 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
             - name: Setup Poetry
               uses: ./.github/actions/setup-poetry
             - name: Get changed Python files
@@ -35,16 +39,18 @@ jobs:
                 git fetch origin ${{ github.base_ref }}
                 CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' || true)
                 echo "changed=$CHANGED_FILES" >> $GITHUB_OUTPUT
-            - name: Run pyright on changed files
+            - name: Run mypy on changed files
               if: steps.changed-files.outputs.changed != ''
               run: |
-                poetry run pyright ${{ steps.changed-files.outputs.changed }}
+                poetry run mypy ${{ steps.changed-files.outputs.changed }}
 
     tests:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
             - name: Setup Poetry
               uses: ./.github/actions/setup-poetry
             - name: Map changed files to test files
