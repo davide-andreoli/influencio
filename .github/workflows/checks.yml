@@ -17,7 +17,7 @@ jobs:
               id: changed-files
               run: |
                 git fetch origin ${{ github.base_ref }}
-                CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' || true)
+                CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' | tr '\n' ' ' || true)
                 echo "changed=$CHANGED_FILES" >> $GITHUB_OUTPUT
             - name: Run ruff on changed files
               if: steps.changed-files.outputs.changed != ''
@@ -37,7 +37,7 @@ jobs:
               id: changed-files
               run: |
                 git fetch origin ${{ github.base_ref }}
-                CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' || true)
+                CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' | tr '\n' ' ' || true)
                 echo "changed=$CHANGED_FILES" >> $GITHUB_OUTPUT
             - name: Run mypy on changed files
               if: steps.changed-files.outputs.changed != ''
@@ -57,7 +57,7 @@ jobs:
               id: changed-tests
               run: |
                 git fetch origin ${{ github.base_ref }}
-                CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' || true)
+                CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' | tr '\n' ' ' || true)
 
                 TEST_FILES=""
                 for file in $CHANGED_FILES; do
