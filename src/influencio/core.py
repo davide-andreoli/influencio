@@ -4,9 +4,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-import shap
+from sklearn.model_selection import cross_val_score, RandomizedSearchCV
+from sklearn.base import BaseEstimator
+from shap import Explainer
+from shap._explanation import Explanation
 from .visualizations import (
     plot_global_feature_importance,
     plot_local_feature_importance,
@@ -16,22 +18,167 @@ from .tree import (
     extract_tree_rules,
     extract_tree_insights,
 )
+from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
+from typing import cast, Optional, Tuple, Dict, Any, List
+import logging
+from joblib import Parallel, delayed
+
+logger = logging.getLogger(__name__)
 
 
 class KeyInfluencers:
-    def __init__(self, dataframe: pd.DataFrame, target: str):
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+        target: str,
+        model: Optional[BaseEstimator] = None,
+        tree_model: Optional[BaseEstimator] = None,
+        tuning: bool = True,
+        tuning_candidates: Optional[
+            Dict[str, Tuple[BaseEstimator, Dict[str, Any]]]
+        ] = None,
+    ):
+        """
+        KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
+        It uses SHAP (SHapley Additive exPlanations) values to explain the predictions of a machine learning model.
+        The class supports both classification and regression tasks.
+        Args:
+            dataframe (pd.DataFrame): The input dataframe containing features and target variable.
+            target (str): The name of the target variable in the dataframe.
+            model (Optional[BaseEstimator]): A user-provided machine learning model for prediction. If None, a default model will be selected based on the target type.
+            tree_model (Optional[BaseEstimator]): A user-provided decision tree model for extracting insights. If None, a default decision tree will be used.
+        """
+
         self.dataframe = dataframe
         self.target = target
 
-        self.model_pipeline = None
-        self.explainer = None
-        self.input_feature_names = dataframe.drop(target, axis=1).columns
-        self.transformed_feature_names = None
-        self.shap_values = None
-        self.target_type = None
+        self.preprocessor: Optional[ColumnTransformer] = None
+        self.tuning: bool = tuning
+        self.tuning_candidates: Optional[
+            Dict[str, Tuple[BaseEstimator, Dict[str, Any]]]
+        ] = tuning_candidates
+        self.model: Optional[BaseEstimator] = model
+        self.tree_model: Optional[BaseEstimator] = tree_model
+        self.model_pipeline: Optional[Pipeline] = None
+        self.tree_pipeline: Optional[Pipeline] = None
+        self.explainer: Optional[Explainer] = None
+        self.class_names: Optional[List[str]] = None
+        self.input_feature_names: List[str] = dataframe.drop(
+            target, axis=1
+        ).columns.to_list()
+        self.transformed_feature_names: Optional[List[str]] = None
+        self.shap_values: Optional[Explanation] = None
+        self.target_type: Optional[ColumnType] = None
+
+    def _evaluate_model(
+        self,
+        X,
+        y,
+        name: str,
+        model: BaseEstimator,
+        scoring: str,
+        param_grid: Dict[str, Any],
+    ) -> Tuple[float, BaseEstimator, Dict[str, Any], str]:  # pragma: no cover
+        pipeline = Pipeline(
+            [
+                ("preprocessor", self.preprocessor),
+                ("predictor", model),
+            ]
+        )
+
+        if self.tuning:
+            search = RandomizedSearchCV(
+                pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
+            )
+            search.fit(X, y)
+            return (
+                search.best_score_,
+                search.best_estimator_.named_steps["predictor"],  # type: ignore
+                search.best_params_,
+                name,
+            )
+        else:
+            scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
+            return (
+                float(np.mean(scores)),
+                model,
+                {},
+                name,
+            )
+
+    def _select_best_model(
+        self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
+    ) -> BaseEstimator:
+        """
+        Selects the best model for the given target type (classification or regression) based on cross-validation scores between a set of candidate models and parameter grids.
+        Args:
+            X (pd.DataFrame): The input features.
+            y (pd.Series): The target variable.
+            target_type (ColumnType): The type of the target variable (categorical or numerical).
+            tuning (bool): Whether to perform hyperparameter tuning using RandomizedSearchCV.
+        Returns:
+            BaseEstimator: The best model selected based on cross-validation scores and hyperparameter tuning.
+        """
+        # TODO: Investigate if it makes sense to make this more gneric, acceppting candicates and scoring as parameters
+        if self.model is not None:
+            logger.info("Using user provided model for prediction.")
+            return self.model
+
+        if target_type == ColumnType.CATEGORICAL:
+            candidate_models = (
+                CLASSIFICATION_CANDIDATES
+                if not self.tuning_candidates
+                else self.tuning_candidates
+            )
+            scoring = "accuracy"
+        elif target_type == ColumnType.NUMERICAL:
+            candidate_models = (
+                REGRESSION_CANDIDATES
+                if not self.tuning_candidates
+                else self.tuning_candidates
+            )
+            scoring = "r2"
+        else:
+            raise ValueError(
+                "Unsupported target type. Only categorical and numerical targets are supported."
+            )
+
+        best_model = None
+        best_score = -float("inf")
+
+        tasks = [
+            delayed(self._evaluate_model)(X, y, name, model, scoring, param_grid)
+            for name, (model, param_grid) in candidate_models.items()
+        ]
+
+        results = cast(
+            List[Tuple[float, BaseEstimator, Dict[str, Any], str]],
+            Parallel(n_jobs=-1)(tasks),
+        )
+
+        best_score, best_model, best_parameters, best_name = max(
+            results, key=lambda x: x[0]
+        )
+
+        logger.info(
+            f"The model automatically selected is {best_name}, with the parameters {best_parameters} and a cross-validation score of {best_score:.4f}"
+        )
+        return best_model
 
     def fit(self):
+        """
+        Fits the model pipeline to the provided dataframe and prepares it for predictions and explanations.
+        This method performs the following steps:
+            1. Splits the dataframe into features (X) and target (y)
+            2. Identifies categorical, numerical and time based columns
+            3. Creates a preprocessing pipeline for the features
+            4. If a model is not provided by the user, it selects the best model based on cross-validation scores
+            5. Fits the model pipeline to the data
+            6. Creates a SHAP explainer for the fitted model and computes SHAP values
+        Notes:
+            - Time-based columns are currently not handled and require additional preprocessing.
+        """
         X = self.dataframe.drop(self.target, axis=1)
         y = self.dataframe[self.target]
 
@@ -74,16 +221,20 @@ class KeyInfluencers:
             ]
         )
 
+        self.preprocessor = preprocessor
+
         self.target_type = self._determine_column_type(y)
 
         # X_train, X_test, y_train, y_test = train_test_split(X, y)
         # TODO: Add automatic model choice based on performance
-        if self.target_type == ColumnType.CATEGORICAL:
-            predictor = LogisticRegression(solver="lbfgs", max_iter=1000)
+        if self.target_type == ColumnType.CATEGORICAL and not self.tree_model:
             tree_predictor = DecisionTreeClassifier(max_depth=3)
-        else:
-            predictor = LinearRegression()
+        elif self.target_type == ColumnType.NUMERICAL and not self.tree_model:
             tree_predictor = DecisionTreeRegressor(max_depth=3)
+        else:
+            tree_predictor = self.tree_model
+
+        predictor = self._select_best_model(X, y, self.target_type)
 
         self.model_pipeline = Pipeline(
             [("preprocessor", preprocessor), ("predictor", predictor)]
@@ -104,26 +255,22 @@ class KeyInfluencers:
         else:
             self.class_names = None
 
-        # TODO: Add option for seeing the shap values for the transformed data
-        # self.explainer = shap.Explainer(
-        #     self.model_pipeline.named_steps["predictor"],
-        #     self.model_pipeline.named_steps["preprocessor"].transform(X),
-        #     feature_names=self.transformed_feature_names,
-        #     output_names=self.class_names,
-        # )
-        self.explainer = shap.Explainer(
-            lambda X: self.model_pipeline.predict_proba(X)
+        self.explainer = Explainer(
+            lambda X: self.model_pipeline.predict_proba(X)  # type: ignore
             if self.target_type == ColumnType.CATEGORICAL
-            else self.model_pipeline.predict(X),
+            else self.model_pipeline.predict(X),  # type: ignore
             X,
             feature_names=self.input_feature_names,
             output_names=self.class_names,
         )
-        self.shap_values = self.explainer(
-            self.model_pipeline.named_steps["preprocessor"].transform(X)
-        )
+        self.shap_values = self.explainer(X)
 
     def global_feature_importance(self, max_display: int = 10):
+        """
+        Plots the global feature importance using SHAP values.
+        Args:
+            max_display (int): The maximum number of features to display in the plot.
+        """
         plot_global_feature_importance(
             self.shap_values,
             max_display=max_display,
@@ -132,11 +279,17 @@ class KeyInfluencers:
         )
 
     def local_feature_importance(self, index: int, max_display: int = 10):
+        """
+        Plots the local feature importance using SHAP values.
+        Args:
+            index (int): The index of the instance for which to plot local feature importance
+            max_display (int): The maximum number of features to display in the plot
+        """
         if index < 0 or index >= len(self.dataframe):
             raise IndexError("Index out of range for the dataframe.")
 
         if self.target_type == ColumnType.CATEGORICAL:
-            predicted_probabilities = self.model_pipeline.predict_proba(
+            predicted_probabilities = self.model_pipeline.predict_proba(  # type: ignore
                 self.dataframe.drop(self.target, axis=1).iloc[index : index + 1]
             )
             predicted_class_index = np.argmax(predicted_probabilities)
@@ -155,10 +308,19 @@ class KeyInfluencers:
         )
 
     def _determine_column_type(self, column: pd.Series) -> ColumnType:
+        """
+        Determines the type of a column based on its data type and unique values.
+        Args:
+            column (pd.Series): The input column to determine the type
+        Returns:
+            ColumnType: The determined type of the column (categorical, numerical, or time)
+        """
         if column.dtype in ["object", "category", "bool"] or len(column.unique()) <= 10:
             return ColumnType.CATEGORICAL
-        elif column.dtype == "datetime64":
-            return ColumnType.TIME
+        elif (
+            column.dtype == "datetime64"
+        ):  # TODO: probably better to use pd.api.types.is_datetime64_any_dtype
+            return ColumnType.TIME  # pragma: no cover
         else:
             return ColumnType.NUMERICAL
 
