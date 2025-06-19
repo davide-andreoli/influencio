@@ -315,11 +315,11 @@ class KeyInfluencers:
         predicted_class_index = None
 
         if self.target_type == ColumnType.CATEGORICAL:
-            predicted_probabilities = self.model_pipeline.predict_proba(
+            predicted_probabilities = self.model_pipeline.predict_proba(  # pyright: ignore[reportOptionalMemberAccess]
                 self.dataframe.drop(self.target, axis=1).iloc[index : index + 1]
             )
             predicted_class_index = np.argmax(predicted_probabilities)
-            shap_values = self.shap_values.values[index, :, predicted_class_index]
+            shap_values = self.shap_values.values[index, :, predicted_class_index]  # pyright: ignore[reportCallIssue, reportArgumentType]
         else:
             # TODO: Add support for regression
             shap_values = self.shap_values.values[index]
@@ -357,14 +357,21 @@ class KeyInfluencers:
             raise ValueError(f"Unhandled column type: {column.dtype}")
 
     def key_segments(
-        self, top_n: int = 5, focus_class: str = None
+        self, top_n: int = 5, focus_class: Optional[str] = None
     ) -> Tuple[Any, Any, Any]:
+        if not self.tree_pipeline:
+            raise NotFittedError(
+                "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
+            )
+
         if self.target_type == ColumnType.CATEGORICAL:
             y = self.dataframe[self.target]
             class_counts = y.value_counts()
+
             if focus_class is None:
-                focus_class = class_counts.idxmax()
-            focus_class_index = list(self.class_names).index(focus_class)
+                focus_class = cast(str, class_counts.idxmax())
+
+            focus_class_index = self.class_names.index(focus_class)  # pyright: ignore [reportOptionalMemberAccess]
             overall_mean = (y == focus_class).mean()
             tree = self.tree_pipeline[-1]
             feature_contributions = extract_feature_contributions(
