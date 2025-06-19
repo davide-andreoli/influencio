@@ -39,10 +39,10 @@ jobs:
                 git fetch origin ${{ github.base_ref }}
                 CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' | tr '\n' ' ' || true)
                 echo "changed=$CHANGED_FILES" >> $GITHUB_OUTPUT
-            - name: Run mypy on changed files
+            - name: Run pyright on changed files
               if: steps.changed-files.outputs.changed != ''
               run: |
-                poetry run mypy ${{ steps.changed-files.outputs.changed }}
+                poetry run pyright ${{ steps.changed-files.outputs.changed }}
 
     tests:
         runs-on: ubuntu-latest
