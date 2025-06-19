@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List
+from typing import List, Optional
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
@@ -9,7 +9,7 @@ from shap._explanation import Explanation
 def plot_global_feature_importance(
     shap_values: Explanation,
     feature_names: List[str],
-    class_names: List[str],
+    class_names: Optional[List[str]],
     max_display: int = 10,
 ):
     feature_class_importance = np.sum(np.abs(shap_values.values), axis=0)
@@ -48,7 +48,7 @@ def plot_local_feature_importance(
     shap_values: Explanation,
     feature_names: List[str],
     max_display=10,
-    class_name: str = None,
+    class_name: Optional[str] = None,
 ):
     graph_title = (
         "Local Feature Importance"

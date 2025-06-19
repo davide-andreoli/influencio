@@ -1,3 +1,4 @@
+from sklearn.base import ClassifierMixin, RegressorMixin
 from sklearn.linear_model import LogisticRegression, LinearRegression, Ridge, Lasso
 from sklearn.ensemble import (
     RandomForestClassifier,
@@ -7,9 +8,11 @@ from sklearn.ensemble import (
 )
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
+from typing import Dict, Tuple, Any, Union
 
-
-CLASSIFICATION_CANDIDATES = {
+CLASSIFICATION_CANDIDATES: Dict[
+    str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
+] = {
     "LogisticRegression": (
         LogisticRegression(solver="liblinear", max_iter=1000),
         {"predictor__C": [0.01, 0.1, 1, 10, 100], "predictor__penalty": ["l1", "l2"]},
@@ -48,7 +51,9 @@ CLASSIFICATION_CANDIDATES = {
     ),
 }
 
-REGRESSION_CANDIDATES = {
+REGRESSION_CANDIDATES: Dict[
+    str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
+] = {
     "LinearRegression": (LinearRegression(), {}),
     "Ridge": (Ridge(), {"predictor__alpha": [0.01, 0.1, 1.0, 10.0]}),
     "Lasso": (Lasso(), {"predictor__alpha": [0.01, 0.1, 1.0, 10.0]}),
