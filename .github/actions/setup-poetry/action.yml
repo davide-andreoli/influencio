@@ -1,0 +1,10 @@
+name: Setup Poetry
+description: Shared setup for Python project using Poetry
+runs:
+  using: "composite"
+  steps:
+      - name: Install poetry
+        uses: snok/install-poetry@v1
+      - name: Install package
+        run: poetry install --with dev
+        shell: bash
