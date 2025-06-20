@@ -101,9 +101,7 @@ def test_global_feature_importance_calls_plot(
     assert "shap_values" in called
     assert called["max_display"] == 7
     assert list(called["feature_names"]) == list(key_influencers.input_feature_names)
-    assert (called["class_names"] == key_influencers.class_names).all() or (
-        called["class_names"] == key_influencers.class_names
-    )
+    assert called["class_names"] == key_influencers.class_names
 
 
 def test_global_feature_importance_regression(

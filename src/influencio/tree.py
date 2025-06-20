@@ -1,5 +1,5 @@
-from sklearn.tree import _tree, DecisionTreeClassifier, DecisionTreeRegressor
-from typing import Union, List
+from sklearn.tree import _tree, DecisionTreeClassifier, DecisionTreeRegressor  # pyright: ignore[reportAttributeAccessIssue]
+from typing import Union, List, Optional
 from .enums import TreeType
 
 
@@ -46,21 +46,21 @@ def extract_tree_rules(
 ):
     tree_ = tree.tree_
     feature_name = [
-        feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
-        for i in tree_.feature
+        feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"  # pyright: ignore[reportAttributeAccessIssue]
+        for i in tree_.feature  # pyright: ignore[reportAttributeAccessIssue]
     ]
 
     rules = []
 
     def traverse_tree(node: int, depth: int):
-        if tree_.feature[node] != _tree.TREE_UNDEFINED:
+        if tree_.feature[node] != _tree.TREE_UNDEFINED:  # pyright: ignore[reportAttributeAccessIssue]
             name = feature_name[node]
-            threshold = tree_.threshold[node]
+            threshold = tree_.threshold[node]  # pyright: ignore[reportAttributeAccessIssue]
 
-            traverse_tree(tree_.children_left[node], depth + 1)
-            traverse_tree(tree_.children_right[node], depth + 1)
+            traverse_tree(tree_.children_left[node], depth + 1)  # pyright: ignore[reportAttributeAccessIssue]
+            traverse_tree(tree_.children_right[node], depth + 1)  # pyright: ignore[reportAttributeAccessIssue]
 
-            rule = DecisionTreeRule(name, threshold, depth, tree_.impurity[node])
+            rule = DecisionTreeRule(name, threshold, depth, tree_.impurity[node])  # pyright: ignore[reportAttributeAccessIssue]
             rules.append(rule)
             # return rule
         else:
@@ -76,7 +76,7 @@ def extract_feature_contributions(
 ):
     tree_ = tree.tree_
 
-    feature_importances = tree_.compute_feature_importances()
+    feature_importances = tree_.compute_feature_importances()  # pyright: ignore[reportCallIssue]
 
     feature_contributions = [
         (feature_names[i], importance)
@@ -94,25 +94,30 @@ def extract_tree_insights(
     overall_metric: float,
     tree_type: TreeType,
     top_n: int = 5,
-    target: str = None,
-    focus_class_index: int = None,
-    focus_class: str = None,
+    target: Optional[str] = None,
+    focus_class_index: Optional[int] = None,
+    focus_class: Optional[str] = None,
 ):
     tree_ = tree.tree_
     insights = []
 
+    if (focus_class is None or focus_class_index is None) and target is None:
+        raise ValueError("Function should be called with focus class or target")
+
     def traverse_tree(node: int, path: List[str]):
-        if tree_.feature[node] != _tree.TREE_UNDEFINED:
-            name = feature_names[tree_.feature[node]]
-            threshold = tree_.threshold[node]
+        if tree_.feature[node] != _tree.TREE_UNDEFINED:  # pyright: ignore[reportAttributeAccessIssue]
+            name = feature_names[tree_.feature[node]]  # pyright: ignore[reportAttributeAccessIssue]
+            threshold = tree_.threshold[node]  # pyright: ignore[reportAttributeAccessIssue]
             traverse_tree(
-                tree_.children_left[node], path + [f"{name} <= {threshold:.2f}"]
+                tree_.children_left[node],  # pyright: ignore[reportAttributeAccessIssue]
+                path + [f"{name} <= {threshold:.2f}"],  # pyright: ignore[reportAttributeAccessIssue]
             )
             traverse_tree(
-                tree_.children_right[node], path + [f"{name} > {threshold:.2f}"]
+                tree_.children_right[node],  # pyright: ignore[reportAttributeAccessIssue]
+                path + [f"{name} > {threshold:.2f}"],  # pyright: ignore[reportAttributeAccessIssue]
             )
         else:
-            samples = tree_.n_node_samples[node]
+            samples = tree_.n_node_samples[node]  # pyright: ignore[reportAttributeAccessIssue]
             value = tree_.value[node][0]
             segment_metric = (
                 value[0] / samples
@@ -130,7 +135,7 @@ def extract_tree_insights(
                     else "value",
                     lift_pct=lift * 100,
                     sample_size=samples,
-                    target=focus_class if focus_class is not None else target,
+                    target=focus_class if focus_class is not None else target,  # pyright: ignore[reportArgumentType]
                 )
             )
 
