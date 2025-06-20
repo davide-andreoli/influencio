@@ -56,8 +56,9 @@ def plot_local_feature_importance(
         else f"Local Feature Importance for Class {class_name}"
     )
 
-    sorted_indices = np.argsort(-np.abs(shap_values))
-    feature_class_importance = shap_values[sorted_indices]
+    shap_array = shap_values.values
+    sorted_indices = np.argsort(-np.abs(shap_array))
+    feature_class_importance = shap_array[sorted_indices]
     feature_names_sorted = [feature_names[i] for i in sorted_indices]
 
     if max_display is not None and max_display < len(feature_names_sorted):

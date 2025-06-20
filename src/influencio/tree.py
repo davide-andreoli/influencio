@@ -109,11 +109,11 @@ def extract_tree_insights(
             name = feature_names[tree_.feature[node]]  # pyright: ignore[reportAttributeAccessIssue]
             threshold = tree_.threshold[node]  # pyright: ignore[reportAttributeAccessIssue]
             traverse_tree(
-                tree_.children_left[node],
+                tree_.children_left[node],  # pyright: ignore[reportAttributeAccessIssue]
                 path + [f"{name} <= {threshold:.2f}"],  # pyright: ignore[reportAttributeAccessIssue]
             )
             traverse_tree(
-                tree_.children_right[node],
+                tree_.children_right[node],  # pyright: ignore[reportAttributeAccessIssue]
                 path + [f"{name} > {threshold:.2f}"],  # pyright: ignore[reportAttributeAccessIssue]
             )
         else:
