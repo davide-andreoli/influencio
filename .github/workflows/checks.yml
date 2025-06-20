@@ -82,8 +82,18 @@ jobs:
                   fi
                 done
 
-                echo "changed=$TEST_FILES" >> $GITHUB_OUTPUT
-            - name: Run tests
-              if: steps.changed-tests.outputs.changed != ''
+                echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+                echo "test_files=$TEST_FILES" >> $GITHUB_OUTPUT
+
+            - name: Print changed and test files
               run: |
-                poetry run pytest ${{ steps.changed-tests.outputs.changed }}
+                echo "Changed Python files:"
+                echo "${{ steps.changed-tests.outputs.changed_files }}"
+                echo ""
+                echo "Matched test files:"
+                echo "${{ steps.changed-tests.outputs.test_files }}"
+
+            - name: Run tests
+              if: steps.changed-tests.outputs.test_files != ''
+              run: |
+                poetry run pytest ${{ steps.changed-tests.outputs.test_files }}
