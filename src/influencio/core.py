@@ -264,7 +264,9 @@ class KeyInfluencers:
             "preprocessor"
         ].get_feature_names_out()
         if self.target_type == ColumnType.CATEGORICAL:
-            self.class_names = self.model_pipeline.named_steps["predictor"].classes_
+            self.class_names = self.model_pipeline.named_steps[
+                "predictor"
+            ].classes_.tolist()
         else:
             self.class_names = None
 
@@ -330,7 +332,7 @@ class KeyInfluencers:
             feature_names=self.input_feature_names,
             class_name=self.class_names[predicted_class_index]
             if self.target_type == ColumnType.CATEGORICAL
-            and self.class_names
+            and self.class_names is not None
             and predicted_class_index
             else None,
         )
@@ -359,7 +361,7 @@ class KeyInfluencers:
     def key_segments(
         self, top_n: int = 5, focus_class: Optional[str] = None
     ) -> Tuple[Any, Any, Any]:
-        if not self.tree_pipeline or not self.transformed_feature_names:
+        if not self.tree_pipeline or self.transformed_feature_names is None:
             raise NotFittedError(
                 "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
             )

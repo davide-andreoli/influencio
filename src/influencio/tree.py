@@ -101,8 +101,8 @@ def extract_tree_insights(
     tree_ = tree.tree_
     insights = []
 
-    if not (focus_class and not focus_class_index) or not target:
-        raise ValueError("Function shoul be called with focus class or target")
+    if (focus_class is None or focus_class_index is None) and target is None:
+        raise ValueError("Function should be called with focus class or target")
 
     def traverse_tree(node: int, path: List[str]):
         if tree_.feature[node] != _tree.TREE_UNDEFINED:  # pyright: ignore[reportAttributeAccessIssue]
@@ -135,7 +135,7 @@ def extract_tree_insights(
                     else "value",
                     lift_pct=lift * 100,
                     sample_size=samples,
-                    target=focus_class if focus_class is not None else target,
+                    target=focus_class if focus_class is not None else target,  # pyright: ignore[reportArgumentType]
                 )
             )
 

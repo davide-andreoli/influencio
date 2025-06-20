@@ -47,7 +47,7 @@ def plot_global_feature_importance(
 
 
 def plot_local_feature_importance(
-    shap_values: Explanation,
+    shap_values: np.ndarray,
     feature_names: List[str],
     max_display=10,
     class_name: Optional[str] = None,
@@ -58,9 +58,8 @@ def plot_local_feature_importance(
         else f"Local Feature Importance for Class {class_name}"
     )
 
-    shap_array = shap_values.values
-    sorted_indices = np.argsort(-np.abs(shap_array))
-    feature_class_importance = shap_array[sorted_indices]
+    sorted_indices = np.argsort(-np.abs(shap_values))
+    feature_class_importance = shap_values[sorted_indices]
     feature_names_sorted = [feature_names[i] for i in sorted_indices]
 
     if max_display is not None and max_display < len(feature_names_sorted):
