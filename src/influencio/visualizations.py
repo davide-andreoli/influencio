@@ -24,7 +24,9 @@ def plot_global_feature_importance(
         feature_names_sorted = feature_names_sorted[:max_display]
 
     data = pd.DataFrame(
-        feature_class_importance, columns=class_names, index=feature_names_sorted
+        feature_class_importance,
+        columns=class_names,  # pyright: ignore[reportArgumentType]
+        index=feature_names_sorted,  # pyright: ignore[reportArgumentType]
     )
     data = data.reset_index().melt(
         id_vars="index", var_name="Class", value_name="Importance"
