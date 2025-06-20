@@ -364,6 +364,10 @@ class KeyInfluencers:
                 "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
             )
 
+        tree = cast(
+            Union[DecisionTreeClassifier, DecisionTreeRegressor], self.tree_pipeline[-1]
+        )
+
         if self.target_type == ColumnType.CATEGORICAL:
             y = self.dataframe[self.target]
             class_counts = y.value_counts()
@@ -373,7 +377,7 @@ class KeyInfluencers:
 
             focus_class_index = self.class_names.index(focus_class)  # pyright: ignore [reportOptionalMemberAccess]
             overall_mean = (y == focus_class).mean()
-            tree = self.tree_pipeline[-1]
+
             feature_contributions = extract_feature_contributions(
                 tree, self.transformed_feature_names
             )
@@ -389,8 +393,7 @@ class KeyInfluencers:
             )
         else:
             y = self.dataframe[self.target]
-            overall_mean = y.mean()
-            tree = self.tree_pipeline[-1]
+            overall_mean = cast(float, y.mean())
             feature_contributions = extract_feature_contributions(
                 tree, self.transformed_feature_names
             )
