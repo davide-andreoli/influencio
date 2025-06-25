@@ -57,11 +57,12 @@ def sample_decision_tree_classifier():
 def fake_plot_global_feature_importance(monkeypatch):
     called = {}
 
-    def fake_plot(shap_values, max_display, feature_names, class_names):
+    def fake_plot(shap_values, max_display, feature_names, class_names, target_type):
         called["shap_values"] = shap_values
         called["max_display"] = max_display
         called["feature_names"] = feature_names
         called["class_names"] = class_names
+        called["target_type"] = target_type
 
     import influencio.core
 
