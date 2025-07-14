@@ -6,7 +6,8 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import cross_val_score, RandomizedSearchCV
-from sklearn.base import BaseEstimator
+from sklearn.base import ClassifierMixin, RegressorMixin
+from sklearn.exceptions import NotFittedError
 from shap import Explainer
 from shap._explanation import Explanation
 from .visualizations import (
@@ -20,7 +21,7 @@ from .tree import (
 )
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
-from typing import cast, Optional, Tuple, Dict, Any, List
+from typing import cast, Optional, Tuple, Dict, Any, List, Union
 import logging
 from joblib import Parallel, delayed
 
@@ -32,11 +33,11 @@ class KeyInfluencers:
         self,
         dataframe: pd.DataFrame,
         target: str,
-        model: Optional[BaseEstimator] = None,
-        tree_model: Optional[BaseEstimator] = None,
+        model: Optional[Union[ClassifierMixin, RegressorMixin]] = None,
+        tree_model: Optional[Union[ClassifierMixin, RegressorMixin]] = None,
         tuning: bool = True,
         tuning_candidates: Optional[
-            Dict[str, Tuple[BaseEstimator, Dict[str, Any]]]
+            Dict[str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]]
         ] = None,
     ):
         """
@@ -46,8 +47,8 @@ class KeyInfluencers:
         Args:
             dataframe (pd.DataFrame): The input dataframe containing features and target variable.
             target (str): The name of the target variable in the dataframe.
-            model (Optional[BaseEstimator]): A user-provided machine learning model for prediction. If None, a default model will be selected based on the target type.
-            tree_model (Optional[BaseEstimator]): A user-provided decision tree model for extracting insights. If None, a default decision tree will be used.
+            model (Optional[Union[ClassifierMixin, RegressorMixin]]): A user-provided machine learning model for prediction. If None, a default model will be selected based on the target type.
+            tree_model (Optional[Union[ClassifierMixin, RegressorMixin]]): A user-provided decision tree model for extracting insights. If None, a default decision tree will be used.
         """
 
         self.dataframe = dataframe
@@ -56,30 +57,32 @@ class KeyInfluencers:
         self.preprocessor: Optional[ColumnTransformer] = None
         self.tuning: bool = tuning
         self.tuning_candidates: Optional[
-            Dict[str, Tuple[BaseEstimator, Dict[str, Any]]]
+            Dict[str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]]
         ] = tuning_candidates
-        self.model: Optional[BaseEstimator] = model
-        self.tree_model: Optional[BaseEstimator] = tree_model
+        self.model: Optional[Union[ClassifierMixin, RegressorMixin]] = model
+        self.tree_model: Optional[Union[ClassifierMixin, RegressorMixin]] = tree_model
         self.model_pipeline: Optional[Pipeline] = None
         self.tree_pipeline: Optional[Pipeline] = None
         self.explainer: Optional[Explainer] = None
         self.class_names: Optional[List[str]] = None
-        self.input_feature_names: List[str] = dataframe.drop(
-            target, axis=1
-        ).columns.to_list()
+        self.input_feature_names: List[str] = cast(
+            List[str], dataframe.drop(target, axis=1).columns.to_list()
+        )
         self.transformed_feature_names: Optional[List[str]] = None
         self.shap_values: Optional[Explanation] = None
         self.target_type: Optional[ColumnType] = None
 
     def _evaluate_model(
         self,
-        X,
-        y,
+        X: pd.DataFrame,
+        y: pd.Series,
         name: str,
-        model: BaseEstimator,
+        model: Union[ClassifierMixin, RegressorMixin],
         scoring: str,
         param_grid: Dict[str, Any],
-    ) -> Tuple[float, BaseEstimator, Dict[str, Any], str]:  # pragma: no cover
+    ) -> Tuple[
+        float, Union[ClassifierMixin, RegressorMixin], Dict[str, Any], str
+    ]:  # pragma: no cover
         pipeline = Pipeline(
             [
                 ("preprocessor", self.preprocessor),
@@ -109,7 +112,7 @@ class KeyInfluencers:
 
     def _select_best_model(
         self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
-    ) -> BaseEstimator:
+    ) -> Union[ClassifierMixin, RegressorMixin]:
         """
         Selects the best model for the given target type (classification or regression) based on cross-validation scores between a set of candidate models and parameter grids.
         Args:
@@ -118,7 +121,7 @@ class KeyInfluencers:
             target_type (ColumnType): The type of the target variable (categorical or numerical).
             tuning (bool): Whether to perform hyperparameter tuning using RandomizedSearchCV.
         Returns:
-            BaseEstimator: The best model selected based on cross-validation scores and hyperparameter tuning.
+            Union[ClassifierMixin, RegressorMixin]: The best model selected based on cross-validation scores and hyperparameter tuning.
         """
         # TODO: Investigate if it makes sense to make this more gneric, acceppting candicates and scoring as parameters
         if self.model is not None:
@@ -126,14 +129,18 @@ class KeyInfluencers:
             return self.model
 
         if target_type == ColumnType.CATEGORICAL:
-            candidate_models = (
+            candidate_models: Dict[
+                str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
+            ] = (
                 CLASSIFICATION_CANDIDATES
                 if not self.tuning_candidates
                 else self.tuning_candidates
             )
             scoring = "accuracy"
         elif target_type == ColumnType.NUMERICAL:
-            candidate_models = (
+            candidate_models: Dict[
+                str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
+            ] = (
                 REGRESSION_CANDIDATES
                 if not self.tuning_candidates
                 else self.tuning_candidates
@@ -153,7 +160,11 @@ class KeyInfluencers:
         ]
 
         results = cast(
-            List[Tuple[float, BaseEstimator, Dict[str, Any], str]],
+            List[
+                Tuple[
+                    float, Union[ClassifierMixin, RegressorMixin], Dict[str, Any], str
+                ]
+            ],
             Parallel(n_jobs=-1)(tasks),
         )
 
@@ -166,7 +177,7 @@ class KeyInfluencers:
         )
         return best_model
 
-    def fit(self):
+    def fit(self) -> None:
         """
         Fits the model pipeline to the provided dataframe and prepares it for predictions and explanations.
         This method performs the following steps:
@@ -179,13 +190,14 @@ class KeyInfluencers:
         Notes:
             - Time-based columns are currently not handled and require additional preprocessing.
         """
-        X = self.dataframe.drop(self.target, axis=1)
-        y = self.dataframe[self.target]
+        X: pd.DataFrame = self.dataframe.drop(self.target, axis=1)
+        y: pd.Series = cast(pd.Series, self.dataframe[self.target])
 
         categorical_columns = [
             column
             for column in X.columns
-            if self._determine_column_type(X[column]) == ColumnType.CATEGORICAL
+            if self._determine_column_type(cast(pd.Series, X[column]))
+            == ColumnType.CATEGORICAL
         ]
         # time_columns = [
         #    column
@@ -195,7 +207,8 @@ class KeyInfluencers:
         numerical_columns = [
             column
             for column in X.columns
-            if self._determine_column_type(X[column]) == ColumnType.NUMERICAL
+            if self._determine_column_type(cast(pd.Series, X[column]))
+            == ColumnType.NUMERICAL
         ]
 
         categorical_pipeline = Pipeline(
@@ -251,34 +264,43 @@ class KeyInfluencers:
             "preprocessor"
         ].get_feature_names_out()
         if self.target_type == ColumnType.CATEGORICAL:
-            self.class_names = self.model_pipeline.named_steps["predictor"].classes_
+            self.class_names = self.model_pipeline.named_steps[
+                "predictor"
+            ].classes_.tolist()
         else:
             self.class_names = None
 
         self.explainer = Explainer(
-            lambda X: self.model_pipeline.predict_proba(X)  # type: ignore
+            lambda X: self.model_pipeline.predict_proba(X)  # pyright: ignore[reportOptionalMemberAccess]
             if self.target_type == ColumnType.CATEGORICAL
-            else self.model_pipeline.predict(X),  # type: ignore
+            else self.model_pipeline.predict(X),  # pyright: ignore[reportOptionalMemberAccess]
             X,
             feature_names=self.input_feature_names,
             output_names=self.class_names,
         )
         self.shap_values = self.explainer(X)
 
-    def global_feature_importance(self, max_display: int = 10):
+    def global_feature_importance(self, max_display: int = 10) -> None:
         """
         Plots the global feature importance using SHAP values.
         Args:
             max_display (int): The maximum number of features to display in the plot.
         """
+
+        if not self.shap_values:
+            raise NotFittedError(
+                "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
+            )
+
         plot_global_feature_importance(
             self.shap_values,
             max_display=max_display,
             feature_names=self.input_feature_names,
             class_names=self.class_names,
+            target_type=self.target_type,
         )
 
-    def local_feature_importance(self, index: int, max_display: int = 10):
+    def local_feature_importance(self, index: int, max_display: int = 10) -> None:
         """
         Plots the local feature importance using SHAP values.
         Args:
@@ -288,14 +310,20 @@ class KeyInfluencers:
         if index < 0 or index >= len(self.dataframe):
             raise IndexError("Index out of range for the dataframe.")
 
+        if not self.shap_values:
+            raise NotFittedError(
+                "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
+            )
+
+        predicted_class_index = None
+
         if self.target_type == ColumnType.CATEGORICAL:
-            predicted_probabilities = self.model_pipeline.predict_proba(  # type: ignore
+            predicted_probabilities = self.model_pipeline.predict_proba(  # pyright: ignore[reportOptionalMemberAccess]
                 self.dataframe.drop(self.target, axis=1).iloc[index : index + 1]
             )
             predicted_class_index = np.argmax(predicted_probabilities)
-            shap_values = self.shap_values.values[index, :, predicted_class_index]
+            shap_values = self.shap_values.values[index, :, predicted_class_index]  # pyright: ignore[reportCallIssue, reportArgumentType]
         else:
-            # TODO: Add support for regression
             shap_values = self.shap_values.values[index]
 
         plot_local_feature_importance(
@@ -304,6 +332,8 @@ class KeyInfluencers:
             feature_names=self.input_feature_names,
             class_name=self.class_names[predicted_class_index]
             if self.target_type == ColumnType.CATEGORICAL
+            and self.class_names is not None
+            and predicted_class_index
             else None,
         )
 
@@ -315,24 +345,41 @@ class KeyInfluencers:
         Returns:
             ColumnType: The determined type of the column (categorical, numerical, or time)
         """
-        if column.dtype in ["object", "category", "bool"] or len(column.unique()) <= 10:
+        if (
+            pd.api.types.is_bool_dtype(column)
+            or pd.api.types.is_object_dtype(column)
+            or column.nunique() <= 10  # TODO: Understand if this limit is good
+        ):
             return ColumnType.CATEGORICAL
-        elif (
-            column.dtype == "datetime64"
-        ):  # TODO: probably better to use pd.api.types.is_datetime64_any_dtype
+        elif pd.api.types.is_datetime64_any_dtype(column):
             return ColumnType.TIME  # pragma: no cover
-        else:
+        elif pd.api.types.is_numeric_dtype(column):
             return ColumnType.NUMERICAL
+        else:
+            raise ValueError(f"Unhandled column type: {column.dtype}")
 
-    def key_segments(self, top_n: int = 5, focus_class: str = None):
+    def key_segments(
+        self, top_n: int = 5, focus_class: Optional[str] = None
+    ) -> Tuple[Any, Any, Any]:
+        if not self.tree_pipeline or self.transformed_feature_names is None:
+            raise NotFittedError(
+                "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
+            )
+
+        tree = cast(
+            Union[DecisionTreeClassifier, DecisionTreeRegressor], self.tree_pipeline[-1]
+        )
+
         if self.target_type == ColumnType.CATEGORICAL:
             y = self.dataframe[self.target]
             class_counts = y.value_counts()
+
             if focus_class is None:
-                focus_class = class_counts.idxmax()
-            focus_class_index = list(self.class_names).index(focus_class)
+                focus_class = cast(str, class_counts.idxmax())
+
+            focus_class_index = self.class_names.index(focus_class)  # pyright: ignore [reportOptionalMemberAccess]
             overall_mean = (y == focus_class).mean()
-            tree = self.tree_pipeline[-1]
+
             feature_contributions = extract_feature_contributions(
                 tree, self.transformed_feature_names
             )
@@ -348,8 +395,7 @@ class KeyInfluencers:
             )
         else:
             y = self.dataframe[self.target]
-            overall_mean = y.mean()
-            tree = self.tree_pipeline[-1]
+            overall_mean = cast(float, y.mean())
             feature_contributions = extract_feature_contributions(
                 tree, self.transformed_feature_names
             )
@@ -358,7 +404,7 @@ class KeyInfluencers:
                 tree,
                 self.transformed_feature_names,
                 overall_mean,
-                "regression",
+                TreeType.REGRESSION,
                 top_n=top_n,
                 target=self.target,
             )
