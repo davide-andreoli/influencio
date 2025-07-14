@@ -297,6 +297,7 @@ class KeyInfluencers:
             max_display=max_display,
             feature_names=self.input_feature_names,
             class_names=self.class_names,
+            target_type=self.target_type,
         )
 
     def local_feature_importance(self, index: int, max_display: int = 10) -> None:
@@ -323,7 +324,6 @@ class KeyInfluencers:
             predicted_class_index = np.argmax(predicted_probabilities)
             shap_values = self.shap_values.values[index, :, predicted_class_index]  # pyright: ignore[reportCallIssue, reportArgumentType]
         else:
-            # TODO: Add support for regression
             shap_values = self.shap_values.values[index]
 
         plot_local_feature_importance(

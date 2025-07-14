@@ -4,45 +4,72 @@ import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
 from shap._explanation import Explanation
+from .enums import ColumnType
 
 
 def plot_global_feature_importance(
     shap_values: Explanation,
     feature_names: List[str],
     class_names: Optional[List[str]],
+    target_type: Optional[ColumnType],
     max_display: int = 10,
 ):
-    feature_class_importance = np.sum(np.abs(shap_values.values), axis=0)
-    total_importance = np.sum(feature_class_importance, axis=1)
-    sorted_indices = np.argsort(-total_importance)
+    # Handle regression (2D) and classification (3D) SHAP values
+    values = shap_values.values
+    if target_type == ColumnType.NUMERICAL:
+        feature_importance = np.sum(np.abs(values), axis=0)
+        sorted_indices = np.argsort(-feature_importance)
+        feature_importance = feature_importance[sorted_indices]
+        feature_names_sorted = [feature_names[i] for i in sorted_indices]
 
-    feature_class_importance = feature_class_importance[sorted_indices]
-    feature_names_sorted = [feature_names[i] for i in sorted_indices]
+        if max_display is not None and max_display < len(feature_names_sorted):
+            feature_importance = feature_importance[:max_display]
+            feature_names_sorted = feature_names_sorted[:max_display]
 
-    if max_display is not None and max_display < len(feature_names_sorted):
-        feature_class_importance = feature_class_importance[:max_display]
-        feature_names_sorted = feature_names_sorted[:max_display]
+        data = pd.DataFrame(
+            {"Feature": feature_names_sorted, "Importance": feature_importance}
+        )
 
-    data = pd.DataFrame(
-        feature_class_importance,
-        columns=class_names,  # pyright: ignore[reportArgumentType]
-        index=feature_names_sorted,  # pyright: ignore[reportArgumentType]
-    )
-    data = data.reset_index().melt(
-        id_vars="index", var_name="Class", value_name="Importance"
-    )
-    data.rename(columns={"index": "Feature"}, inplace=True)
+        fig = px.bar(
+            data,
+            x="Feature",
+            y="Importance",
+            title="Global Feature Importances (SHAP)",
+            labels={"Feature": "Feature", "Importance": "Total SHAP Importance"},
+            text="Importance",
+        )
+    else:
+        feature_class_importance = np.sum(np.abs(values), axis=0)
+        total_importance = np.sum(feature_class_importance, axis=1)
+        sorted_indices = np.argsort(-total_importance)
 
-    # TODO: Format the values to be more readable
-    fig = px.bar(
-        data,
-        x="Feature",
-        y="Importance",
-        color="Class",
-        title="Stacked Feature Importances by Class (SHAP)",
-        labels={"Feature": "Feature", "Importance": "Total SHAP Importance"},
-        text="Importance",
-    )
+        feature_class_importance = feature_class_importance[sorted_indices]
+        feature_names_sorted = [feature_names[i] for i in sorted_indices]
+
+        if max_display is not None and max_display < len(feature_names_sorted):
+            feature_class_importance = feature_class_importance[:max_display]
+            feature_names_sorted = feature_names_sorted[:max_display]
+
+        data = pd.DataFrame(
+            feature_class_importance,
+            columns=class_names,
+            index=feature_names_sorted,
+        )
+        data = data.reset_index().melt(
+            id_vars="index", var_name="Class", value_name="Importance"
+        )
+        data.rename(columns={"index": "Feature"}, inplace=True)
+
+        fig = px.bar(
+            data,
+            x="Feature",
+            y="Importance",
+            color="Class",
+            title="Stacked Feature Importances by Class (SHAP)",
+            labels={"Feature": "Feature", "Importance": "Total SHAP Importance"},
+            text="Importance",
+        )
+
     fig.show()
 
 
