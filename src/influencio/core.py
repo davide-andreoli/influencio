@@ -135,7 +135,7 @@ class KeyInfluencers:
         low_variance_columns = []
 
         for col in numeric_columns:
-            if X[col].var() < 1e-10:
+            if X[col].to_numpy().var() < 1e-10:
                 low_variance_columns.append(col)
 
         if low_variance_columns:
@@ -189,7 +189,7 @@ class KeyInfluencers:
             search.fit(X, y)
             return (
                 search.best_score_,
-                search.best_estimator_.named_steps["predictor"],  # type: ignore
+                search.best_estimator_.named_steps["predictor"],  # pyright: ignore[reportAttributeAccessIssue]
                 search.best_params_,
                 name,
             )
@@ -215,6 +215,9 @@ class KeyInfluencers:
         Returns:
             Dictionary containing performance metrics
         """
+        if not self.model_pipeline:
+            raise ValueError("Model pipeline not initialized.")
+
         if not self.model_evaluator:
             task_type = (
                 "classification"
@@ -235,7 +238,7 @@ class KeyInfluencers:
             task_type="classification"
             if self.target_type == ColumnType.CATEGORICAL
             else "regression",
-            tuning=False,  # We assume model_pipeline is already tuned
+            tuning=False,
         )
 
         return eval_result.all_scores

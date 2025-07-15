@@ -1,12 +1,13 @@
 from .data_classes import MetricConfig, ModelEvaluationResult
 from .enums import MetricType, DataCharacteristic
-from typing import Optional, List, Literal, Dict, Any, Tuple
+from typing import cast, Optional, List, Literal, Dict, Any, Tuple, Union
 import pandas as pd
 import numpy as np
-from sklearn.base import BaseEstimator
 from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import cross_validate, RandomizedSearchCV
 import logging
+from sklearn.base import ClassifierMixin, RegressorMixin
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ class ModelEvaluator:
         """Analyze regression target variable characteristics"""
         characteristics = []
 
-        skewness = abs(y.skew())
+        skewness = abs(float(y.skew()))  # pyright: ignore[reportArgumentType]
         if skewness > 1:
             characteristics.append(DataCharacteristic.HIGH_DIMENSIONAL)
 
@@ -205,12 +206,12 @@ class ModelEvaluator:
 
     def _extract_cv_scores(
         self,
-        raw_scores: Dict[str, Any],
+        raw_scores: Dict[str, np.ndarray[Any, Any]],
         metric_configs: List[MetricConfig],
         prefix: str = "test_",
         best_index: Optional[int] = None,
         is_search: bool = False,
-    ) -> Tuple[Dict[str, float], Dict[str, np.ndarray], Dict[str, float]]:
+    ) -> Tuple[Dict[str, np.float64], Dict[str, np.ndarray], Dict[str, np.float64]]:
         """
         Extract mean, std, and raw scores from CV results.
         `best_index` only needed for grid/randomized search.
@@ -237,21 +238,21 @@ class ModelEvaluator:
                 [metric.handle_negative_scores(v) for v in values]
             )
 
-            means[key] = float(np.mean(correct_values))
-            stds[key] = float(np.std(correct_values))
+            means[key] = np.mean(correct_values)
+            stds[key] = np.std(correct_values)
             cv_values[key] = correct_values
 
         return means, cv_values, stds
 
     def evaluate_model(
         self,
-        model: BaseEstimator,
+        model: Union[ClassifierMixin, RegressorMixin],
         model_name: str,
         X: pd.DataFrame,
         y: pd.Series,
         param_grid: Dict[str, Any],
         pipeline,
-        task_type: str,
+        task_type: Literal["classification", "regression"],
         tuning: bool = True,
     ) -> ModelEvaluationResult:
         """Evaluate a single model with selected metrics in a single CV run."""
@@ -260,6 +261,10 @@ class ModelEvaluator:
 
         scoring = {metric.metric_type.value: metric.sklearn_name for metric in metrics}
         primary_metric_id = metrics[0].metric_type.value
+
+        cv_results: Optional[Dict[str, np.ndarray[Any, Any]]] = None
+        cv_result: Optional[Dict[str, np.ndarray[Any, Any]]] = None
+        search: Optional[RandomizedSearchCV] = None
 
         if tuning and param_grid:
             search = RandomizedSearchCV(
@@ -274,7 +279,7 @@ class ModelEvaluator:
             )
 
             search.fit(X, y)
-            best_model = search.best_estimator_.named_steps.get(
+            best_model = search.best_estimator_.named_steps.get(  # pyright: ignore[reportAttributeAccessIssue]
                 "predictor", search.best_estimator_
             )
             best_params = search.best_params_
@@ -296,10 +301,13 @@ class ModelEvaluator:
                 n_jobs=-1,
             )
 
+        if not cv_result and not cv_results:
+            raise ValueError("No cross-validation results available.")
+
         mean_scores, cv_scores, std_scores = self._extract_cv_scores(
-            raw_scores=cv_results if tuning else cv_result,
+            raw_scores=cv_results if tuning else cv_result,  # pyright: ignore [reportArgumentType]
             metric_configs=metrics,
-            best_index=search.best_index_ if tuning else None,
+            best_index=search.best_index_ if tuning and search else None,
             is_search=tuning,
         )
 
@@ -308,7 +316,7 @@ class ModelEvaluator:
             logger.warning(
                 f"Weighted score for {model_name} is NaN. Check metric config and scoring."
             )
-        primary_score = mean_scores.get(primary_metric_id, 0.0)
+        primary_score = mean_scores.get(primary_metric_id, cast(np.float64, 0.0))
 
         return ModelEvaluationResult(
             model_name=model_name,
@@ -324,11 +332,13 @@ class ModelEvaluator:
 
     def evaluate_candidates(
         self,
-        candidates: Dict[str, Tuple[BaseEstimator, Dict[str, Any]]],
+        candidates: Dict[
+            str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
+        ],
         X: pd.DataFrame,
         y: pd.Series,
-        task_type: str,
-        preprocessor: Optional[BaseEstimator] = None,
+        task_type: Literal["classification", "regression"],
+        preprocessor: Optional[ColumnTransformer] = None,
         tuning: bool = True,
     ) -> List[ModelEvaluationResult]:
         """Evaluates all candidate models and selects the best one."""
@@ -364,7 +374,7 @@ class ModelEvaluator:
 
     def _calculate_weighted_score(
         self,
-        scores: Dict[str, float],
+        scores: Dict[str, np.float64],
         metrics: List[MetricConfig],
         normalization_bounds: Optional[Dict[str, Tuple[float, float]]] = None,
     ) -> float:
@@ -411,14 +421,14 @@ class ModelEvaluator:
         normalization_bounds = {}
         for metric in metrics:
             values = [s[metric] for s in all_scores if metric in s]
-            min_val = min(values)
-            max_val = max(values)
+            min_val = np.min(values)
+            max_val = np.max(values)
             normalization_bounds[metric] = (min_val, max_val)
 
         for result in results:
             result.weighted_score = self._calculate_weighted_score(
                 result.all_scores,
-                metrics=result.metric_configs,
+                metrics=result.metric_configs if result.metric_configs else [],
                 normalization_bounds=normalization_bounds,
             )
 
