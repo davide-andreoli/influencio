@@ -86,42 +86,49 @@ class KeyInfluencers:
         """
 
         if len(X) < 10:
-            raise ValueError(f"The given dataset is too small: {len(X)}. Please use a dataset containing at least 10 rows")
-        
+            raise ValueError(
+                f"The given dataset is too small: {len(X)}. Please use a dataset containing at least 10 rows"
+            )
+
         if y.isnull().all():
             raise ValueError("The target variable contains only null values.")
 
         if y.isnull().sum() > len(y) * 0.5:
-            logger.warning(f"Target variable has {y.isnull().sum()/len(y)*100:.1f}% missing values.")
+            logger.warning(
+                f"Target variable has {y.isnull().sum()/len(y)*100:.1f}% missing values."
+            )
 
         numeric_columns = X.select_dtypes(include=[np.number]).columns
         low_variance_columns = []
-        
+
         for col in numeric_columns:
             if X[col].var() < 1e-10:
                 low_variance_columns.append(col)
-        
+
         if low_variance_columns:
             logger.warning(f"Low variance features detected: {low_variance_columns}")
-        
-        
+
         high_missing_columns = []
         for col in X.columns:
             missing_percent = X[col].isnull().sum() / len(X)
             if missing_percent > 0.8:
                 high_missing_columns.append((col, missing_percent))
-        
+
         if high_missing_columns:
             logger.warning(f"Features with >80% missing values: {high_missing_columns}")
-        
+
         target_type = self._determine_column_type(y)
         if target_type == ColumnType.CATEGORICAL:
             unique_values = y.nunique()
             if unique_values < 2:
-                raise ValueError(f"Categorical target must have at least 2 classes. Found: {unique_values}")
+                raise ValueError(
+                    f"Categorical target must have at least 2 classes. Found: {unique_values}"
+                )
             if unique_values > 50:
-                logger.warning(f"High cardinality target: {unique_values} classes. Consider grouping to improve performances.")
-        
+                logger.warning(
+                    f"High cardinality target: {unique_values} classes. Consider grouping to improve performances."
+                )
+
         logger.info("Data validation completed successfully.")
 
     def _evaluate_model(
@@ -161,105 +168,120 @@ class KeyInfluencers:
                 {},
                 name,
             )
-        
+
     def _evaluate_model_performance(
         self, X: pd.DataFrame, y: pd.Series
     ) -> Dict[str, np.float64]:
         """
         Evaluates chosen model performance using cross-validation.
-        
+
         Args:
             X: Feature dataframe
             y: Target series
-            
+
         Returns:
             Dictionary containing performance metrics
         """
         if self.target_type == ColumnType.CATEGORICAL:
-            
-            scoring = ['accuracy', 'precision_macro', 'recall_macro', 'f1_macro']
-            
+            scoring = ["accuracy", "precision_macro", "recall_macro", "f1_macro"]
+
             if len(np.unique(y)) == 2:
-                scoring.append('roc_auc')
-            
+                scoring.append("roc_auc")
+
             cv_results = cross_validate(
-                self.model_pipeline, X, y, 
-                cv=5, 
-                scoring=scoring,
-                return_train_score=True
-            )
-            
-            metrics = {
-                'accuracy_mean': np.mean(cv_results['test_accuracy']),
-                'accuracy_std': np.std(cv_results['test_accuracy']),
-                'precision_mean': np.mean(cv_results['test_precision_macro']),
-                'precision_std': np.std(cv_results['test_precision_macro']),
-                'recall_mean': np.mean(cv_results['test_recall_macro']),
-                'recall_std': np.std(cv_results['test_recall_macro']),
-                'f1_mean': np.mean(cv_results['test_f1_macro']),
-                'f1_std': np.std(cv_results['test_f1_macro']),
-                'train_accuracy_mean': np.mean(cv_results['train_accuracy']),
-                'overfitting_score': np.mean(cv_results['train_accuracy']) - np.mean(cv_results['test_accuracy'])
-            }
-            
-            if 'test_roc_auc' in cv_results:
-                metrics.update({
-                    'roc_auc_mean': np.mean(cv_results['test_roc_auc']),
-                    'roc_auc_std': np.std(cv_results['test_roc_auc'])
-                })
-                
-        else:
-            scoring = ['r2', 'neg_mean_squared_error', 'neg_mean_absolute_error']
-            
-            cv_results = cross_validate(
-                self.model_pipeline, X, y,
+                self.model_pipeline,
+                X,
+                y,
                 cv=5,
                 scoring=scoring,
-                return_train_score=True
+                return_train_score=True,
             )
-            
+
             metrics = {
-                'r2_mean': np.mean(cv_results['test_r2']),
-                'r2_std': np.std(cv_results['test_r2'].std()),
-                'mse_mean': -np.mean(cv_results['test_neg_mean_squared_error']),
-                'mse_std': np.std(cv_results['test_neg_mean_squared_error']),
-                'mae_mean': -np.mean(cv_results['test_neg_mean_absolute_error']),
-                'mae_std': np.std(cv_results['test_neg_mean_absolute_error']),
-                'train_r2_mean': np.mean(cv_results['train_r2']),
-                'overfitting_score': np.mean(cv_results['train_r2']) - np.mean(cv_results['test_r2'])
+                "accuracy_mean": np.mean(cv_results["test_accuracy"]),
+                "accuracy_std": np.std(cv_results["test_accuracy"]),
+                "precision_mean": np.mean(cv_results["test_precision_macro"]),
+                "precision_std": np.std(cv_results["test_precision_macro"]),
+                "recall_mean": np.mean(cv_results["test_recall_macro"]),
+                "recall_std": np.std(cv_results["test_recall_macro"]),
+                "f1_mean": np.mean(cv_results["test_f1_macro"]),
+                "f1_std": np.std(cv_results["test_f1_macro"]),
+                "train_accuracy_mean": np.mean(cv_results["train_accuracy"]),
+                "overfitting_score": np.mean(cv_results["train_accuracy"])
+                - np.mean(cv_results["test_accuracy"]),
             }
-            
-            metrics['rmse_mean'] = np.sqrt(metrics['mse_mean'])
-        
+
+            if "test_roc_auc" in cv_results:
+                metrics.update(
+                    {
+                        "roc_auc_mean": np.mean(cv_results["test_roc_auc"]),
+                        "roc_auc_std": np.std(cv_results["test_roc_auc"]),
+                    }
+                )
+
+        else:
+            scoring = ["r2", "neg_mean_squared_error", "neg_mean_absolute_error"]
+
+            cv_results = cross_validate(
+                self.model_pipeline,
+                X,
+                y,
+                cv=5,
+                scoring=scoring,
+                return_train_score=True,
+            )
+
+            metrics = {
+                "r2_mean": np.mean(cv_results["test_r2"]),
+                "r2_std": np.std(cv_results["test_r2"].std()),
+                "mse_mean": -np.mean(cv_results["test_neg_mean_squared_error"]),
+                "mse_std": np.std(cv_results["test_neg_mean_squared_error"]),
+                "mae_mean": -np.mean(cv_results["test_neg_mean_absolute_error"]),
+                "mae_std": np.std(cv_results["test_neg_mean_absolute_error"]),
+                "train_r2_mean": np.mean(cv_results["train_r2"]),
+                "overfitting_score": np.mean(cv_results["train_r2"])
+                - np.mean(cv_results["test_r2"]),
+            }
+
+            metrics["rmse_mean"] = np.sqrt(metrics["mse_mean"])
+
         return metrics
-    
+
     def print_model_performance(self) -> None:
         """
         Prints a formatted summary of model performance metrics.
         """
         if not self.model_metrics:
-            raise RuntimeError("Model must be fitted before printing performance metrics. Call fit() first.")
-        
+            raise RuntimeError(
+                "Model must be fitted before printing performance metrics. Call fit() first."
+            )
+
         metrics = self.model_metrics
-        print("\n" + "="*50)
+        print("\n" + "=" * 50)
         print("MODEL PERFORMANCE SUMMARY")
-        print("="*50)
-        
+        print("=" * 50)
+
         if self.target_type == ColumnType.CATEGORICAL:
-            print(f"Accuracy: {metrics['accuracy_mean']:.3f} ± {metrics['accuracy_std']:.3f}")
-            print(f"Precision: {metrics['precision_mean']:.3f} ± {metrics['precision_std']:.3f}")
+            print(
+                f"Accuracy: {metrics['accuracy_mean']:.3f} ± {metrics['accuracy_std']:.3f}"
+            )
+            print(
+                f"Precision: {metrics['precision_mean']:.3f} ± {metrics['precision_std']:.3f}"
+            )
             print(f"Recall: {metrics['recall_mean']:.3f} ± {metrics['recall_std']:.3f}")
             print(f"F1-Score: {metrics['f1_mean']:.3f} ± {metrics['f1_std']:.3f}")
-            
-            if 'roc_auc_mean' in metrics:
-                print(f"ROC AUC: {metrics['roc_auc_mean']:.3f} ± {metrics['roc_auc_std']:.3f}")
-            
+
+            if "roc_auc_mean" in metrics:
+                print(
+                    f"ROC AUC: {metrics['roc_auc_mean']:.3f} ± {metrics['roc_auc_std']:.3f}"
+                )
+
             print(f"Training Accuracy: {metrics['train_accuracy_mean']:.3f}")
             print(f"Overfitting Score: {metrics['overfitting_score']:.3f}")
-            
-            if metrics['overfitting_score'] > 0.1:
+
+            if metrics["overfitting_score"] > 0.1:
                 print("⚠️  High overfitting detected!")
-            
+
         else:
             print(f"R²: {metrics['r2_mean']:.3f} ± {metrics['r2_std']:.3f}")
             print(f"MSE: {metrics['mse_mean']:.3f} ± {metrics['mse_std']:.3f}")
@@ -267,11 +289,11 @@ class KeyInfluencers:
             print(f"MAE: {metrics['mae_mean']:.3f} ± {metrics['mae_std']:.3f}")
             print(f"Training R²: {metrics['train_r2_mean']:.3f}")
             print(f"Overfitting Score: {metrics['overfitting_score']:.3f}")
-            
-            if metrics['overfitting_score'] > 0.1:
+
+            if metrics["overfitting_score"] > 0.1:
                 print("⚠️  High overfitting detected!")
-        
-        print("="*50)
+
+        print("=" * 50)
 
     def _select_best_model(
         self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
@@ -291,7 +313,7 @@ class KeyInfluencers:
             logger.info("Using user provided model for prediction.")
             return self.model
 
-        #TODO: Add a way to autoselect the best scoring 
+        # TODO: Add a way to autoselect the best scoring
         if target_type == ColumnType.CATEGORICAL:
             candidate_models: Dict[
                 str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
