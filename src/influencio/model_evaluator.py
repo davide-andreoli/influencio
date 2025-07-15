@@ -4,6 +4,7 @@ from typing import Optional, List, Literal, Dict, Any, Tuple
 import pandas as pd
 import numpy as np
 from sklearn.base import BaseEstimator
+from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_validate, RandomizedSearchCV
 import logging
 
@@ -323,6 +324,46 @@ class ModelEvaluator:
             metric_configs=metrics,
         )
 
+    def evaluate_candidates(
+        self,
+        candidates: Dict[str, Tuple[BaseEstimator, Dict[str, Any]]],
+        X: pd.DataFrame,
+        y: pd.Series,
+        task_type: str,
+        preprocessor: Optional[BaseEstimator] = None,
+        tuning: bool = True,
+    ) -> List[ModelEvaluationResult]:
+        """Evaluates all candidate models and selects the best one."""
+        results = []
+
+        for name, (model, param_grid) in candidates.items():
+            pipeline = Pipeline([("preprocessor", preprocessor), ("predictor", model)])
+
+            try:
+                result = self.evaluate_model(
+                    model=model,
+                    model_name=name,
+                    X=X,
+                    y=y,
+                    param_grid=param_grid,
+                    pipeline=pipeline,
+                    task_type=task_type,
+                    tuning=tuning,
+                )
+                results.append(result)
+                logger.info(
+                    f"Evaluated {name}: Primary Score = {result.primary_score:.4f}, Weighted Score = {result.weighted_score:.4f}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to evaluate {name}: {str(e)}")
+
+        if not results:
+            raise ValueError("No models could be successfully evaluated.")
+
+        sorted_results = self.compare_models(results)
+
+        return sorted_results
+
     def _calculate_weighted_score(
         self,
         scores: Dict[str, float],
@@ -364,7 +405,7 @@ class ModelEvaluator:
 
     def compare_models(
         self, results: List[ModelEvaluationResult]
-    ) -> ModelEvaluationResult:
+    ) -> List[ModelEvaluationResult]:
         if not results:
             raise ValueError("No model results to compare")
 
@@ -390,7 +431,8 @@ class ModelEvaluator:
             )
 
         sorted_results = sorted(results, key=lambda x: x.weighted_score, reverse=True)
-        return sorted_results[0]
+
+        return sorted_results
 
     def print_evaluation_summary(self, result: ModelEvaluationResult):
         """Print a summary of model evaluation results"""

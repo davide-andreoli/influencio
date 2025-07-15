@@ -259,7 +259,6 @@ class KeyInfluencers:
         Returns:
             Union[ClassifierMixin, RegressorMixin]: The best model selected based on cross-validation scores and hyperparameter tuning.
         """
-        # TODO: Investigate if it makes sense to make this more gneric, acceppting candicates and scoring as parameters
         if self.model is not None:
             logger.info("Using user provided model for prediction.")
             return self.model
@@ -268,75 +267,31 @@ class KeyInfluencers:
             "classification" if target_type == ColumnType.CATEGORICAL else "regression"
         )
 
-        self.model_evaluator = self._create_model_evaluator(task_type)
+        if not self.model_evaluator:
+            self.model_evaluator = self._create_model_evaluator(task_type)
 
-        # TODO: Add a way to autoselect the best scoring
-        if target_type == ColumnType.CATEGORICAL:
-            candidate_models: Dict[
-                str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
-            ] = (
+        candidates = (
+            (
                 CLASSIFICATION_CANDIDATES
-                if not self.tuning_candidates
-                else self.tuning_candidates
+                if target_type == ColumnType.CATEGORICAL
+                else REGRESSION_CANDIDATES
             )
-        elif target_type == ColumnType.NUMERICAL:
-            candidate_models: Dict[
-                str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
-            ] = (
-                REGRESSION_CANDIDATES
-                if not self.tuning_candidates
-                else self.tuning_candidates
-            )
-        else:
-            raise ValueError(
-                "Unsupported target type. Only categorical and numerical targets are supported."
-            )
+            if not self.tuning_candidates
+            else self.tuning_candidates
+        )
 
-        # Evaluate all models
-        evaluation_results = []
+        results = self.model_evaluator.evaluate_candidates(
+            candidates=candidates,
+            X=X,
+            y=y,
+            task_type=task_type,
+            preprocessor=self.preprocessor,
+            tuning=self.tuning,
+        )
 
-        for model_name, (model, param_grid) in candidate_models.items():
-            # Create pipeline for this model
-            pipeline = Pipeline(
-                [("preprocessor", self.preprocessor), ("predictor", model)]
-            )
-
-            try:
-                result = self.model_evaluator.evaluate_model(
-                    model=model,
-                    model_name=model_name,
-                    X=X,
-                    y=y,
-                    param_grid=param_grid,
-                    pipeline=pipeline,
-                    task_type=task_type,
-                    tuning=self.tuning,
-                )
-                evaluation_results.append(result)
-
-                logger.info(
-                    f"Evaluated {model_name}: "
-                    f"Primary Score = {result.primary_score:.4f}, "
-                    f"Weighted Score = {result.weighted_score:.4f}"
-                )
-
-            except Exception as e:
-                logger.warning(f"Failed to evaluate {model_name}: {str(e)}")
-                continue
-
-        if not evaluation_results:
-            raise ValueError("No models could be successfully evaluated")
-
-        # Store results for later analysis
-        self.evaluation_results = evaluation_results
-
-        # Select best model
-        self.best_model_result = self.model_evaluator.compare_models(evaluation_results)
-
-        # Print evaluation summary
-        self.model_evaluator.print_evaluation_summary(self.best_model_result)
-
-        return self.best_model_result.model
+        self.evaluation_results = results
+        logger.info(f"Best evaluated model: {results[0]}")
+        return results[0].model
 
     def get_model_comparison(self) -> pd.DataFrame:
         """
@@ -505,7 +460,6 @@ class KeyInfluencers:
         self.tree_pipeline.fit(X, y)
 
         self.model_metrics = self._evaluate_model_performance(X, y)
-        logger.info(f"Model performance metrics: {self.model_metrics}")
 
         self.transformed_feature_names = self.model_pipeline.named_steps[
             "preprocessor"
