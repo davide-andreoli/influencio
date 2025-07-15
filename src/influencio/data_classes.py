@@ -18,6 +18,21 @@ class MetricConfig:
         if self.sklearn_name is None:
             self.sklearn_name = self.metric_type.value
 
+        if self.sklearn_name.startswith("neg_"):
+            self.higher_is_better = False
+
+    def handle_negative_scores(self, raw_score: float) -> float:
+        """Convert sklearn score to consistent 'higher is better' format"""
+        if self.sklearn_name.startswith("neg_"):
+            return -raw_score
+        return raw_score
+
+    def get_display_score(self, raw_score: float) -> float:
+        """Get score for display purposes (original metric interpretation)"""
+        if self.sklearn_name.startswith("neg_"):
+            return -raw_score
+        return raw_score
+
 
 @dataclass
 class ModelEvaluationResult:

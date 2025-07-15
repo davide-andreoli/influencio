@@ -341,23 +341,19 @@ class KeyInfluencers:
 
         comparison_df = self.get_model_comparison()
 
-        # Create comparison plot
         import matplotlib.pyplot as plt
         import seaborn as sns
 
         plt.figure(figsize=(12, 8))
 
-        # Plot primary metric comparison
         plt.subplot(2, 2, 1)
         sns.barplot(data=comparison_df, x="Primary_Score", y="Model")
         plt.title("Primary Metric Comparison")
 
-        # Plot weighted score comparison
         plt.subplot(2, 2, 2)
         sns.barplot(data=comparison_df, x="Weighted_Score", y="Model")
         plt.title("Weighted Score Comparison")
 
-        # Plot all metrics heatmap
         plt.subplot(2, 1, 2)
         metrics_cols = [
             col

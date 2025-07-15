@@ -224,24 +224,22 @@ class ModelEvaluator:
             sk_key = f"{prefix}{key}"
 
             if is_search:
-                # Use search.cv_results_
                 values = np.array(
                     [
-                        -raw_scores[f"split{i}_{sk_key}"][best_index]
-                        if metric.sklearn_name.startswith("neg_")
-                        else raw_scores[f"split{i}_{sk_key}"][best_index]
+                        raw_scores[f"split{i}_{sk_key}"][best_index]
                         for i in range(self.cv_folds)
                     ]
                 )
             else:
-                # Use cross_validate result
                 values = raw_scores[sk_key]
-                if metric.sklearn_name.startswith("neg_"):
-                    values = -values
 
-            means[key] = float(np.mean(values))
-            stds[key] = float(np.std(values))
-            cv_values[key] = values
+            correct_values = np.array(
+                [metric.handle_negative_scores(v) for v in values]
+            )
+
+            means[key] = float(np.mean(correct_values))
+            stds[key] = float(np.std(correct_values))
+            cv_values[key] = correct_values
 
         return means, cv_values, stds
 
@@ -386,17 +384,15 @@ class ModelEvaluator:
                 continue
 
             raw_score = scores[key]
-            # Convert to "higher is better" if necessary
+
             score = raw_score if metric.higher_is_better else -raw_score
 
-            # Normalize score if bounds provided
             if normalization_bounds and key in normalization_bounds:
                 min_val, max_val = normalization_bounds[key]
                 if max_val != min_val:
                     score = (score - min_val) / (max_val - min_val)
                 else:
-                    score = 1.0  # Constant metric case
-            # If no bounds provided, skip normalization (fallback)
+                    score = 1.0
 
             weighted_sum += score * metric.weight
             total_weight += metric.weight
@@ -409,11 +405,8 @@ class ModelEvaluator:
         if not results:
             raise ValueError("No model results to compare")
 
-        # Compute bounds for normalization
         all_scores = [r.all_scores for r in results]
-        metrics = list(
-            all_scores[0].keys()
-        )  # assume all models evaluated on same metrics
+        metrics = list(all_scores[0].keys())
 
         normalization_bounds = {}
         for metric in metrics:
@@ -422,7 +415,6 @@ class ModelEvaluator:
             max_val = max(values)
             normalization_bounds[metric] = (min_val, max_val)
 
-        # Recalculate normalized weighted scores
         for result in results:
             result.weighted_score = self._calculate_weighted_score(
                 result.all_scores,
@@ -458,7 +450,6 @@ def create_advanced_evaluator_for_task(
 ) -> ModelEvaluator:
     """Factory function to create evaluator based on task requirements"""
 
-    # Define some common metric configurations
     if focus_on == "precision" and task_type == "classification":
         custom_metrics = [
             MetricConfig(MetricType.PRECISION, weight=1.0),
