@@ -5,7 +5,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.model_selection import cross_val_score, RandomizedSearchCV, cross_validate
+from sklearn.model_selection import cross_val_score, RandomizedSearchCV
 from sklearn.base import ClassifierMixin, RegressorMixin
 from sklearn.exceptions import NotFittedError
 from shap import Explainer
@@ -19,11 +19,15 @@ from .tree import (
     extract_tree_rules,
     extract_tree_insights,
 )
+from .model_evaluator import (
+    ModelEvaluator,
+    MetricConfig,
+    create_advanced_evaluator_for_task,
+)
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
 from typing import cast, Optional, Tuple, Dict, Any, List, Union
 import logging
-from joblib import Parallel, delayed
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,12 @@ class KeyInfluencers:
         tuning_candidates: Optional[
             Dict[str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]]
         ] = None,
+        evaluation_strategy: str = "adaptive",
+        custom_metrics: Optional[List[MetricConfig]] = None,
+        focus_on: Optional[
+            str
+        ] = None,  # "precision", "recall", "balanced", "interpretability"
+        cv_folds: int = 5,
     ):
         """
         KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
@@ -72,6 +82,29 @@ class KeyInfluencers:
         self.shap_values: Optional[Explanation] = None
         self.target_type: Optional[ColumnType] = None
         self.model_metrics: Optional[Dict[str, np.float64]] = None
+
+        self.evaluation_strategy = evaluation_strategy
+        self.custom_metrics = custom_metrics
+        self.focus_on = focus_on
+        self.cv_folds = cv_folds
+        self.model_evaluator: Optional[ModelEvaluator] = None
+        self.evaluation_results: Optional[List] = None
+        self.best_model_result: Optional[Any] = None
+
+    def _create_model_evaluator(self, task_type: str) -> ModelEvaluator:
+        """Create and configure the model evaluator"""
+        if self.evaluation_strategy == "user_defined" and self.custom_metrics:
+            return ModelEvaluator(
+                custom_metrics=self.custom_metrics,
+                cv_folds=self.cv_folds,
+                scoring_strategy="user_defined",
+            )
+        else:
+            return create_advanced_evaluator_for_task(
+                task_type=task_type,
+                custom_metrics=self.custom_metrics,
+                focus_on=self.focus_on,
+            )
 
     def _validate_data(self, X: pd.DataFrame, y: pd.Series):
         """
@@ -182,118 +215,36 @@ class KeyInfluencers:
         Returns:
             Dictionary containing performance metrics
         """
-        if self.target_type == ColumnType.CATEGORICAL:
-            scoring = ["accuracy", "precision_macro", "recall_macro", "f1_macro"]
-
-            if len(np.unique(y)) == 2:
-                scoring.append("roc_auc")
-
-            cv_results = cross_validate(
-                self.model_pipeline,
-                X,
-                y,
-                cv=5,
-                scoring=scoring,
-                return_train_score=True,
+        if not self.model_evaluator:
+            task_type = (
+                "classification"
+                if self.target_type == ColumnType.CATEGORICAL
+                else "regression"
             )
+            self.model_evaluator = self._create_model_evaluator(task_type)
 
-            metrics = {
-                "accuracy_mean": np.mean(cv_results["test_accuracy"]),
-                "accuracy_std": np.std(cv_results["test_accuracy"]),
-                "precision_mean": np.mean(cv_results["test_precision_macro"]),
-                "precision_std": np.std(cv_results["test_precision_macro"]),
-                "recall_mean": np.mean(cv_results["test_recall_macro"]),
-                "recall_std": np.std(cv_results["test_recall_macro"]),
-                "f1_mean": np.mean(cv_results["test_f1_macro"]),
-                "f1_std": np.std(cv_results["test_f1_macro"]),
-                "train_accuracy_mean": np.mean(cv_results["train_accuracy"]),
-                "overfitting_score": np.mean(cv_results["train_accuracy"])
-                - np.mean(cv_results["test_accuracy"]),
-            }
+        dummy_param_grid = {}
 
-            if "test_roc_auc" in cv_results:
-                metrics.update(
-                    {
-                        "roc_auc_mean": np.mean(cv_results["test_roc_auc"]),
-                        "roc_auc_std": np.std(cv_results["test_roc_auc"]),
-                    }
-                )
+        eval_result = self.model_evaluator.evaluate_model(
+            model=self.model_pipeline.named_steps["predictor"],
+            model_name="final_model",
+            X=X,
+            y=y,
+            param_grid=dummy_param_grid,
+            pipeline=self.model_pipeline,
+            task_type="classification"
+            if self.target_type == ColumnType.CATEGORICAL
+            else "regression",
+            tuning=False,  # We assume model_pipeline is already tuned
+        )
 
-        else:
-            scoring = ["r2", "neg_mean_squared_error", "neg_mean_absolute_error"]
-
-            cv_results = cross_validate(
-                self.model_pipeline,
-                X,
-                y,
-                cv=5,
-                scoring=scoring,
-                return_train_score=True,
-            )
-
-            metrics = {
-                "r2_mean": np.mean(cv_results["test_r2"]),
-                "r2_std": np.std(cv_results["test_r2"].std()),
-                "mse_mean": -np.mean(cv_results["test_neg_mean_squared_error"]),
-                "mse_std": np.std(cv_results["test_neg_mean_squared_error"]),
-                "mae_mean": -np.mean(cv_results["test_neg_mean_absolute_error"]),
-                "mae_std": np.std(cv_results["test_neg_mean_absolute_error"]),
-                "train_r2_mean": np.mean(cv_results["train_r2"]),
-                "overfitting_score": np.mean(cv_results["train_r2"])
-                - np.mean(cv_results["test_r2"]),
-            }
-
-            metrics["rmse_mean"] = np.sqrt(metrics["mse_mean"])
-
-        return metrics
+        return eval_result.all_scores
 
     def print_model_performance(self) -> None:
         """
         Prints a formatted summary of model performance metrics.
         """
-        if not self.model_metrics:
-            raise RuntimeError(
-                "Model must be fitted before printing performance metrics. Call fit() first."
-            )
-
-        metrics = self.model_metrics
-        print("\n" + "=" * 50)
-        print("MODEL PERFORMANCE SUMMARY")
-        print("=" * 50)
-
-        if self.target_type == ColumnType.CATEGORICAL:
-            print(
-                f"Accuracy: {metrics['accuracy_mean']:.3f} ± {metrics['accuracy_std']:.3f}"
-            )
-            print(
-                f"Precision: {metrics['precision_mean']:.3f} ± {metrics['precision_std']:.3f}"
-            )
-            print(f"Recall: {metrics['recall_mean']:.3f} ± {metrics['recall_std']:.3f}")
-            print(f"F1-Score: {metrics['f1_mean']:.3f} ± {metrics['f1_std']:.3f}")
-
-            if "roc_auc_mean" in metrics:
-                print(
-                    f"ROC AUC: {metrics['roc_auc_mean']:.3f} ± {metrics['roc_auc_std']:.3f}"
-                )
-
-            print(f"Training Accuracy: {metrics['train_accuracy_mean']:.3f}")
-            print(f"Overfitting Score: {metrics['overfitting_score']:.3f}")
-
-            if metrics["overfitting_score"] > 0.1:
-                print("⚠️  High overfitting detected!")
-
-        else:
-            print(f"R²: {metrics['r2_mean']:.3f} ± {metrics['r2_std']:.3f}")
-            print(f"MSE: {metrics['mse_mean']:.3f} ± {metrics['mse_std']:.3f}")
-            print(f"RMSE: {metrics['rmse_mean']:.3f}")
-            print(f"MAE: {metrics['mae_mean']:.3f} ± {metrics['mae_std']:.3f}")
-            print(f"Training R²: {metrics['train_r2_mean']:.3f}")
-            print(f"Overfitting Score: {metrics['overfitting_score']:.3f}")
-
-            if metrics["overfitting_score"] > 0.1:
-                print("⚠️  High overfitting detected!")
-
-        print("=" * 50)
+        pass
 
     def _select_best_model(
         self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
@@ -313,6 +264,12 @@ class KeyInfluencers:
             logger.info("Using user provided model for prediction.")
             return self.model
 
+        task_type = (
+            "classification" if target_type == ColumnType.CATEGORICAL else "regression"
+        )
+
+        self.model_evaluator = self._create_model_evaluator(task_type)
+
         # TODO: Add a way to autoselect the best scoring
         if target_type == ColumnType.CATEGORICAL:
             candidate_models: Dict[
@@ -322,7 +279,6 @@ class KeyInfluencers:
                 if not self.tuning_candidates
                 else self.tuning_candidates
             )
-            scoring = "accuracy"
         elif target_type == ColumnType.NUMERICAL:
             candidate_models: Dict[
                 str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
@@ -331,37 +287,137 @@ class KeyInfluencers:
                 if not self.tuning_candidates
                 else self.tuning_candidates
             )
-            scoring = "r2"
         else:
             raise ValueError(
                 "Unsupported target type. Only categorical and numerical targets are supported."
             )
 
-        best_model = None
-        best_score = -float("inf")
+        # Evaluate all models
+        evaluation_results = []
 
-        tasks = [
-            delayed(self._evaluate_model)(X, y, name, model, scoring, param_grid)
-            for name, (model, param_grid) in candidate_models.items()
+        for model_name, (model, param_grid) in candidate_models.items():
+            # Create pipeline for this model
+            pipeline = Pipeline(
+                [("preprocessor", self.preprocessor), ("predictor", model)]
+            )
+
+            try:
+                result = self.model_evaluator.evaluate_model(
+                    model=model,
+                    model_name=model_name,
+                    X=X,
+                    y=y,
+                    param_grid=param_grid,
+                    pipeline=pipeline,
+                    task_type=task_type,
+                    tuning=self.tuning,
+                )
+                evaluation_results.append(result)
+
+                logger.info(
+                    f"Evaluated {model_name}: "
+                    f"Primary Score = {result.primary_score:.4f}, "
+                    f"Weighted Score = {result.weighted_score:.4f}"
+                )
+
+            except Exception as e:
+                logger.warning(f"Failed to evaluate {model_name}: {str(e)}")
+                continue
+
+        if not evaluation_results:
+            raise ValueError("No models could be successfully evaluated")
+
+        # Store results for later analysis
+        self.evaluation_results = evaluation_results
+
+        # Select best model
+        self.best_model_result = self.model_evaluator.compare_models(evaluation_results)
+
+        # Print evaluation summary
+        self.model_evaluator.print_evaluation_summary(self.best_model_result)
+
+        return self.best_model_result.model
+
+    def get_model_comparison(self) -> pd.DataFrame:
+        """
+        Return a DataFrame comparing all evaluated models
+        """
+        if not self.evaluation_results:
+            raise ValueError("No evaluation results available. Run fit() first.")
+
+        comparison_data = []
+        for result in self.evaluation_results:
+            row = {
+                "Model": result.model_name,
+                "Primary_Score": result.primary_score,
+                "Weighted_Score": result.weighted_score,
+                **result.all_scores,
+                **{f"{k}_std": v for k, v in result.std_scores.items()},
+            }
+            comparison_data.append(row)
+
+        df = pd.DataFrame(comparison_data)
+        return df.sort_values("Weighted_Score", ascending=False)
+
+    def get_evaluation_summary(self) -> Dict[str, Any]:
+        """
+        Get detailed evaluation summary
+        """
+        if not self.best_model_result:
+            raise ValueError("No evaluation results available. Run fit() first.")
+
+        return {
+            "best_model": self.best_model_result.model_name,
+            "best_params": self.best_model_result.best_params,
+            "primary_score": self.best_model_result.primary_score,
+            "weighted_score": self.best_model_result.weighted_score,
+            "all_scores": self.best_model_result.all_scores,
+            "score_stds": self.best_model_result.std_scores,
+            "cv_folds": self.cv_folds,
+            "evaluation_strategy": self.evaluation_strategy,
+        }
+
+    def plot_model_comparison(self):
+        """
+        Plot comparison of all evaluated models
+        """
+        if not self.evaluation_results:
+            raise ValueError("No evaluation results available. Run fit() first.")
+
+        comparison_df = self.get_model_comparison()
+
+        # Create comparison plot
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        plt.figure(figsize=(12, 8))
+
+        # Plot primary metric comparison
+        plt.subplot(2, 2, 1)
+        sns.barplot(data=comparison_df, x="Primary_Score", y="Model")
+        plt.title("Primary Metric Comparison")
+
+        # Plot weighted score comparison
+        plt.subplot(2, 2, 2)
+        sns.barplot(data=comparison_df, x="Weighted_Score", y="Model")
+        plt.title("Weighted Score Comparison")
+
+        # Plot all metrics heatmap
+        plt.subplot(2, 1, 2)
+        metrics_cols = [
+            col
+            for col in comparison_df.columns
+            if col not in ["Model", "Primary_Score", "Weighted_Score"]
+            and not col.endswith("_std")
         ]
 
-        results = cast(
-            List[
-                Tuple[
-                    float, Union[ClassifierMixin, RegressorMixin], Dict[str, Any], str
-                ]
-            ],
-            Parallel(n_jobs=-1)(tasks),
-        )
+        if metrics_cols:
+            heatmap_data = comparison_df[["Model"] + metrics_cols].set_index("Model")
+            sns.heatmap(heatmap_data, annot=True, fmt=".3f", cmap="RdYlBu_r")
+            plt.title("All Metrics Heatmap")
 
-        best_score, best_model, best_parameters, best_name = max(
-            results, key=lambda x: x[0]
-        )
-
-        logger.info(
-            f"The model automatically selected is {best_name}, with the parameters {best_parameters} and a cross-validation score of {best_score:.4f}"
-        )
-        return best_model
+        plt.tight_layout()
+        plt.show()
 
     def fit(self) -> None:
         """
