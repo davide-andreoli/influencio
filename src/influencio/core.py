@@ -18,7 +18,7 @@ from .tree import (
     extract_tree_rules,
     extract_tree_insights,
 )
-from .model_evaluator import ModelEvaluator, MetricConfig
+from .evaluator import ModelEvaluator, MetricConfig
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
 from typing import cast, Optional, Tuple, Dict, Any, List, Union, Literal
