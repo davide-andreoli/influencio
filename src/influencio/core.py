@@ -5,7 +5,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.model_selection import cross_val_score, RandomizedSearchCV
 from sklearn.base import ClassifierMixin, RegressorMixin
 from sklearn.exceptions import NotFittedError
 from shap import Explainer
@@ -19,11 +18,11 @@ from .tree import (
     extract_tree_rules,
     extract_tree_insights,
 )
+from .evaluator import ModelEvaluator, MetricConfig
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
-from typing import cast, Optional, Tuple, Dict, Any, List, Union
+from typing import cast, Optional, Tuple, Dict, Any, List, Union, Literal
 import logging
-from joblib import Parallel, delayed
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +38,10 @@ class KeyInfluencers:
         tuning_candidates: Optional[
             Dict[str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]]
         ] = None,
+        evaluation_strategy: str = "adaptive",
+        custom_metrics: Optional[List[MetricConfig]] = None,
+        focus_on: Optional[Literal["precision", "recall", "balanced"]] = None,
+        cv_folds: int = 5,
     ):
         """
         KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
@@ -71,44 +74,148 @@ class KeyInfluencers:
         self.transformed_feature_names: Optional[List[str]] = None
         self.shap_values: Optional[Explanation] = None
         self.target_type: Optional[ColumnType] = None
+        self.model_metrics: Optional[Dict[str, np.float64]] = None
 
-    def _evaluate_model(
+        self.evaluation_strategy = evaluation_strategy
+        self.custom_metrics = custom_metrics
+        self.focus_on = focus_on
+        self.cv_folds = cv_folds
+        self.model_evaluator: Optional[ModelEvaluator] = None
+        self.evaluation_results: Optional[List] = None
+        self.best_model_result: Optional[Any] = None
+
+    def _create_model_evaluator(
+        self, task_type: Literal["classification", "regression"]
+    ) -> ModelEvaluator:
+        """Create and configure the model evaluator"""
+        if self.evaluation_strategy == "user_defined" and self.custom_metrics:
+            return ModelEvaluator(
+                custom_metrics=self.custom_metrics,
+                cv_folds=self.cv_folds,
+                scoring_strategy="user_defined",
+            )
+        elif self.focus_on:
+            return ModelEvaluator.from_focus(
+                task_type=task_type,
+                focus_on=self.focus_on,  # pyright: ignore[reportArgumentType]
+            )
+        else:
+            return ModelEvaluator(
+                cv_folds=self.cv_folds,
+                scoring_strategy="adaptive",
+            )
+
+    def _validate_data(self, X: pd.DataFrame, y: pd.Series):
+        """
+        Validates input data quality and structure.
+
+        Args:
+            X: Feature dataframe
+            y: target series
+
+        Raises:
+            ValueError: if data does not meet the minimum requirements
+        """
+
+        if len(X) < 10:
+            raise ValueError(
+                f"The given dataset is too small: {len(X)}. Please use a dataset containing at least 10 rows"
+            )
+
+        if y.isnull().all():
+            raise ValueError("The target variable contains only null values.")
+
+        if y.isnull().sum() > len(y) * 0.5:
+            logger.warning(
+                f"Target variable has {y.isnull().sum()/len(y)*100:.1f}% missing values."
+            )
+
+        numeric_columns = X.select_dtypes(include=[np.number]).columns
+        low_variance_columns = []
+
+        for col in numeric_columns:
+            if X[col].to_numpy().var() < 1e-10:
+                low_variance_columns.append(col)
+
+        if low_variance_columns:
+            logger.warning(f"Low variance features detected: {low_variance_columns}")
+
+        high_missing_columns = []
+        for col in X.columns:
+            missing_percent = X[col].isnull().sum() / len(X)
+            if missing_percent > 0.8:
+                high_missing_columns.append((col, missing_percent))
+
+        if high_missing_columns:
+            logger.warning(f"Features with >80% missing values: {high_missing_columns}")
+
+        target_type = self._determine_column_type(y)
+        if target_type == ColumnType.CATEGORICAL:
+            unique_values = y.nunique()
+            if unique_values < 2:
+                raise ValueError(
+                    f"Categorical target must have at least 2 classes. Found: {unique_values}"
+                )
+            if unique_values > 50:
+                logger.warning(
+                    f"High cardinality target: {unique_values} classes. Consider grouping to improve performances."
+                )
+
+        logger.info("Data validation completed successfully.")
+
+    def _evaluate_model_performance(
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        name: str,
-        model: Union[ClassifierMixin, RegressorMixin],
-        scoring: str,
-        param_grid: Dict[str, Any],
-    ) -> Tuple[
-        float, Union[ClassifierMixin, RegressorMixin], Dict[str, Any], str
-    ]:  # pragma: no cover
-        pipeline = Pipeline(
-            [
-                ("preprocessor", self.preprocessor),
-                ("predictor", model),
-            ]
+        predictor: Union[ClassifierMixin, RegressorMixin],
+    ) -> Dict[str, np.float64]:
+        """
+        Evaluates chosen model performance using cross-validation.
+
+        Args:
+            X: Feature dataframe
+            y: Target series
+
+        Returns:
+            Dictionary containing performance metrics
+        """
+        if not self.preprocessor:
+            raise ValueError("Preprocessor is not initialized.")
+
+        if not self.model_evaluator:
+            task_type = (
+                "classification"
+                if self.target_type == ColumnType.CATEGORICAL
+                else "regression"
+            )
+            self.model_evaluator = self._create_model_evaluator(task_type)
+
+        model_pipeline = Pipeline(
+            [("preprocessor", self.preprocessor), ("predictor", predictor)]
         )
 
-        if self.tuning:
-            search = RandomizedSearchCV(
-                pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
-            )
-            search.fit(X, y)
-            return (
-                search.best_score_,
-                search.best_estimator_.named_steps["predictor"],  # type: ignore
-                search.best_params_,
-                name,
-            )
-        else:
-            scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
-            return (
-                float(np.mean(scores)),
-                model,
-                {},
-                name,
-            )
+        dummy_param_grid = {}
+
+        eval_result = self.model_evaluator.evaluate_model(
+            model=model_pipeline.named_steps["predictor"],
+            model_name="final_model",
+            X=X,
+            y=y,
+            param_grid=dummy_param_grid,
+            pipeline=model_pipeline,
+            task_type="classification"
+            if self.target_type == ColumnType.CATEGORICAL
+            else "regression",
+            tuning=False,
+        )
+
+        return eval_result.all_scores
+
+    def print_model_performance(self) -> None:
+        """
+        Prints a formatted summary of model performance metrics.
+        """
+        pass
 
     def _select_best_model(
         self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
@@ -123,59 +230,118 @@ class KeyInfluencers:
         Returns:
             Union[ClassifierMixin, RegressorMixin]: The best model selected based on cross-validation scores and hyperparameter tuning.
         """
-        # TODO: Investigate if it makes sense to make this more gneric, acceppting candicates and scoring as parameters
         if self.model is not None:
             logger.info("Using user provided model for prediction.")
+            self.model_metrics = self._evaluate_model_performance(X, y, self.model)
             return self.model
 
-        if target_type == ColumnType.CATEGORICAL:
-            candidate_models: Dict[
-                str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
-            ] = (
+        task_type = (
+            "classification" if target_type == ColumnType.CATEGORICAL else "regression"
+        )
+
+        if not self.model_evaluator:
+            self.model_evaluator = self._create_model_evaluator(task_type)
+
+        candidates = (
+            (
                 CLASSIFICATION_CANDIDATES
-                if not self.tuning_candidates
-                else self.tuning_candidates
+                if target_type == ColumnType.CATEGORICAL
+                else REGRESSION_CANDIDATES
             )
-            scoring = "accuracy"
-        elif target_type == ColumnType.NUMERICAL:
-            candidate_models: Dict[
-                str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]
-            ] = (
-                REGRESSION_CANDIDATES
-                if not self.tuning_candidates
-                else self.tuning_candidates
-            )
-            scoring = "r2"
-        else:
-            raise ValueError(
-                "Unsupported target type. Only categorical and numerical targets are supported."
-            )
+            if not self.tuning_candidates
+            else self.tuning_candidates
+        )
 
-        best_model = None
-        best_score = -float("inf")
+        results = self.model_evaluator.evaluate_candidates(
+            candidates=candidates,
+            X=X,
+            y=y,
+            task_type=task_type,
+            preprocessor=self.preprocessor,
+            tuning=self.tuning,
+        )
 
-        tasks = [
-            delayed(self._evaluate_model)(X, y, name, model, scoring, param_grid)
-            for name, (model, param_grid) in candidate_models.items()
+        self.evaluation_results = results
+        logger.info(f"Best evaluated model: {results[0]}")
+        self.model_metrics = results[0].all_scores
+        return results[0].model
+
+    def get_model_comparison(self) -> pd.DataFrame:
+        """
+        Return a DataFrame comparing all evaluated models
+        """
+        if not self.evaluation_results:
+            raise ValueError("No evaluation results available. Run fit() first.")
+
+        comparison_data = []
+        for result in self.evaluation_results:
+            row = {
+                "Model": result.model_name,
+                "Primary_Score": result.primary_score,
+                "Weighted_Score": result.weighted_score,
+                **result.all_scores,
+                **{f"{k}_std": v for k, v in result.std_scores.items()},
+            }
+            comparison_data.append(row)
+
+        df = pd.DataFrame(comparison_data)
+        return df.sort_values("Weighted_Score", ascending=False)
+
+    def get_evaluation_summary(self) -> Dict[str, Any]:
+        """
+        Get detailed evaluation summary
+        """
+        if not self.best_model_result:
+            raise ValueError("No evaluation results available. Run fit() first.")
+
+        return {
+            "best_model": self.best_model_result.model_name,
+            "best_params": self.best_model_result.best_params,
+            "primary_score": self.best_model_result.primary_score,
+            "weighted_score": self.best_model_result.weighted_score,
+            "all_scores": self.best_model_result.all_scores,
+            "score_stds": self.best_model_result.std_scores,
+            "cv_folds": self.cv_folds,
+            "evaluation_strategy": self.evaluation_strategy,
+        }
+
+    def plot_model_comparison(self):
+        """
+        Plot comparison of all evaluated models
+        """
+        if not self.evaluation_results:
+            raise ValueError("No evaluation results available. Run fit() first.")
+
+        comparison_df = self.get_model_comparison()
+
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        plt.figure(figsize=(12, 8))
+
+        plt.subplot(2, 2, 1)
+        sns.barplot(data=comparison_df, x="Primary_Score", y="Model")
+        plt.title("Primary Metric Comparison")
+
+        plt.subplot(2, 2, 2)
+        sns.barplot(data=comparison_df, x="Weighted_Score", y="Model")
+        plt.title("Weighted Score Comparison")
+
+        plt.subplot(2, 1, 2)
+        metrics_cols = [
+            col
+            for col in comparison_df.columns
+            if col not in ["Model", "Primary_Score", "Weighted_Score"]
+            and not col.endswith("_std")
         ]
 
-        results = cast(
-            List[
-                Tuple[
-                    float, Union[ClassifierMixin, RegressorMixin], Dict[str, Any], str
-                ]
-            ],
-            Parallel(n_jobs=-1)(tasks),
-        )
+        if metrics_cols:
+            heatmap_data = comparison_df[["Model"] + metrics_cols].set_index("Model")
+            sns.heatmap(heatmap_data, annot=True, fmt=".3f", cmap="RdYlBu_r")
+            plt.title("All Metrics Heatmap")
 
-        best_score, best_model, best_parameters, best_name = max(
-            results, key=lambda x: x[0]
-        )
-
-        logger.info(
-            f"The model automatically selected is {best_name}, with the parameters {best_parameters} and a cross-validation score of {best_score:.4f}"
-        )
-        return best_model
+        plt.tight_layout()
+        plt.show()
 
     def fit(self) -> None:
         """
@@ -192,6 +358,8 @@ class KeyInfluencers:
         """
         X: pd.DataFrame = self.dataframe.drop(self.target, axis=1)
         y: pd.Series = cast(pd.Series, self.dataframe[self.target])
+
+        self._validate_data(X, y)
 
         categorical_columns = [
             column
@@ -226,7 +394,7 @@ class KeyInfluencers:
         )
 
         # TODO: Add preprocessor for time data
-
+        # TODO: Maybe add a feature selection step in the pipeline
         preprocessor = ColumnTransformer(
             [
                 ("categorical", categorical_pipeline, categorical_columns),
