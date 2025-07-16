@@ -19,14 +19,10 @@ from .tree import (
     extract_tree_rules,
     extract_tree_insights,
 )
-from .model_evaluator import (
-    ModelEvaluator,
-    MetricConfig,
-    create_advanced_evaluator_for_task,
-)
+from .model_evaluator import ModelEvaluator, MetricConfig
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
-from typing import cast, Optional, Tuple, Dict, Any, List, Union
+from typing import cast, Optional, Tuple, Dict, Any, List, Union, Literal
 import logging
 
 logger = logging.getLogger(__name__)
@@ -45,9 +41,7 @@ class KeyInfluencers:
         ] = None,
         evaluation_strategy: str = "adaptive",
         custom_metrics: Optional[List[MetricConfig]] = None,
-        focus_on: Optional[
-            str
-        ] = None,  # "precision", "recall", "balanced", "interpretability"
+        focus_on: Optional[Literal["precision", "recall", "balanced"]] = None,
         cv_folds: int = 5,
     ):
         """
@@ -91,7 +85,9 @@ class KeyInfluencers:
         self.evaluation_results: Optional[List] = None
         self.best_model_result: Optional[Any] = None
 
-    def _create_model_evaluator(self, task_type: str) -> ModelEvaluator:
+    def _create_model_evaluator(
+        self, task_type: Literal["classification", "regression"]
+    ) -> ModelEvaluator:
         """Create and configure the model evaluator"""
         if self.evaluation_strategy == "user_defined" and self.custom_metrics:
             return ModelEvaluator(
@@ -99,11 +95,15 @@ class KeyInfluencers:
                 cv_folds=self.cv_folds,
                 scoring_strategy="user_defined",
             )
-        else:
-            return create_advanced_evaluator_for_task(
+        elif self.focus_on:
+            return ModelEvaluator.from_focus(
                 task_type=task_type,
-                custom_metrics=self.custom_metrics,
-                focus_on=self.focus_on,
+                focus_on=self.focus_on,  # pyright: ignore[reportArgumentType]
+            )
+        else:
+            return ModelEvaluator(
+                cv_folds=self.cv_folds,
+                scoring_strategy="adaptive",
             )
 
     def _validate_data(self, X: pd.DataFrame, y: pd.Series):
@@ -458,6 +458,7 @@ class KeyInfluencers:
         self.model_pipeline.fit(X, y)
         self.tree_pipeline.fit(X, y)
 
+        # TODO: This step should be performed inside the select best model
         self.model_metrics = self._evaluate_model_performance(X, y)
 
         self.transformed_feature_names = self.model_pipeline.named_steps[

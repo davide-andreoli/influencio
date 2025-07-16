@@ -452,34 +452,32 @@ class ModelEvaluator:
             std = result.std_scores.get(metric, 0.0)
             print(f"{metric:20}: {score:.4f} (±{std:.4f})")
 
-
-def create_advanced_evaluator_for_task(
-    task_type: str,
-    custom_metrics: Optional[List[MetricConfig]] = None,
-    focus_on: Optional[str] = None,  # "precision", "recall", "balanced", etc.
-) -> ModelEvaluator:
-    """Factory function to create evaluator based on task requirements"""
-
-    if focus_on == "precision" and task_type == "classification":
-        custom_metrics = [
-            MetricConfig(MetricType.PRECISION, weight=1.0),
-            MetricConfig(MetricType.F1, weight=0.8),
-            MetricConfig(MetricType.ROC_AUC, weight=0.6),
-        ]
-    elif focus_on == "recall" and task_type == "classification":
-        custom_metrics = [
-            MetricConfig(MetricType.RECALL, weight=1.0),
-            MetricConfig(MetricType.F1, weight=0.8),
-            MetricConfig(MetricType.BALANCED_ACCURACY, weight=0.6),
-        ]
-    elif focus_on == "balanced" and task_type == "classification":
-        custom_metrics = [
-            MetricConfig(MetricType.BALANCED_ACCURACY, weight=1.0),
-            MetricConfig(MetricType.F1, weight=0.9),
-            MetricConfig(MetricType.MATTHEWS_CORR, weight=0.7),
-        ]
-
-    return ModelEvaluator(
-        custom_metrics=custom_metrics,
-        scoring_strategy="adaptive" if custom_metrics is None else "user_defined",
-    )
+    @classmethod
+    def from_focus(
+        cls,
+        task_type: Literal["classification", "regression"],
+        focus_on: Optional[Literal["precision", "recall", "balanced"]],
+    ):
+        custom_metrics = []
+        if focus_on == "precision" and task_type == "classification":
+            custom_metrics = [
+                MetricConfig(MetricType.PRECISION, weight=1.0),
+                MetricConfig(MetricType.F1, weight=0.8),
+                MetricConfig(MetricType.ROC_AUC, weight=0.6),
+            ]
+        elif focus_on == "recall" and task_type == "classification":
+            custom_metrics = [
+                MetricConfig(MetricType.RECALL, weight=1.0),
+                MetricConfig(MetricType.F1, weight=0.8),
+                MetricConfig(MetricType.BALANCED_ACCURACY, weight=0.6),
+            ]
+        elif focus_on == "balanced" and task_type == "classification":
+            custom_metrics = [
+                MetricConfig(MetricType.BALANCED_ACCURACY, weight=1.0),
+                MetricConfig(MetricType.F1, weight=0.9),
+                MetricConfig(MetricType.MATTHEWS_CORR, weight=0.7),
+            ]
+        return ModelEvaluator(
+            custom_metrics=custom_metrics,
+            scoring_strategy="user_defined",
+        )
