@@ -5,7 +5,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.model_selection import cross_val_score, RandomizedSearchCV
 from sklearn.base import ClassifierMixin, RegressorMixin
 from sklearn.exceptions import NotFittedError
 from shap import Explainer
@@ -164,46 +163,11 @@ class KeyInfluencers:
 
         logger.info("Data validation completed successfully.")
 
-    def _evaluate_model(
+    def _evaluate_model_performance(
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        name: str,
-        model: Union[ClassifierMixin, RegressorMixin],
-        scoring: str,
-        param_grid: Dict[str, Any],
-    ) -> Tuple[
-        float, Union[ClassifierMixin, RegressorMixin], Dict[str, Any], str
-    ]:  # pragma: no cover
-        pipeline = Pipeline(
-            [
-                ("preprocessor", self.preprocessor),
-                ("predictor", model),
-            ]
-        )
-
-        if self.tuning:
-            search = RandomizedSearchCV(
-                pipeline, param_grid, cv=3, scoring=scoring, n_jobs=-1
-            )
-            search.fit(X, y)
-            return (
-                search.best_score_,
-                search.best_estimator_.named_steps["predictor"],  # pyright: ignore[reportAttributeAccessIssue]
-                search.best_params_,
-                name,
-            )
-        else:
-            scores = cross_val_score(pipeline, X, y, cv=3, scoring=scoring)
-            return (
-                float(np.mean(scores)),
-                model,
-                {},
-                name,
-            )
-
-    def _evaluate_model_performance(
-        self, X: pd.DataFrame, y: pd.Series
+        predictor: Union[ClassifierMixin, RegressorMixin],
     ) -> Dict[str, np.float64]:
         """
         Evaluates chosen model performance using cross-validation.
@@ -215,8 +179,8 @@ class KeyInfluencers:
         Returns:
             Dictionary containing performance metrics
         """
-        if not self.model_pipeline:
-            raise ValueError("Model pipeline not initialized.")
+        if not self.preprocessor:
+            raise ValueError("Preprocessor is not initialized.")
 
         if not self.model_evaluator:
             task_type = (
@@ -226,15 +190,19 @@ class KeyInfluencers:
             )
             self.model_evaluator = self._create_model_evaluator(task_type)
 
+        model_pipeline = Pipeline(
+            [("preprocessor", self.preprocessor), ("predictor", predictor)]
+        )
+
         dummy_param_grid = {}
 
         eval_result = self.model_evaluator.evaluate_model(
-            model=self.model_pipeline.named_steps["predictor"],
+            model=model_pipeline.named_steps["predictor"],
             model_name="final_model",
             X=X,
             y=y,
             param_grid=dummy_param_grid,
-            pipeline=self.model_pipeline,
+            pipeline=model_pipeline,
             task_type="classification"
             if self.target_type == ColumnType.CATEGORICAL
             else "regression",
@@ -264,6 +232,7 @@ class KeyInfluencers:
         """
         if self.model is not None:
             logger.info("Using user provided model for prediction.")
+            self.model_metrics = self._evaluate_model_performance(X, y, self.model)
             return self.model
 
         task_type = (
@@ -294,6 +263,7 @@ class KeyInfluencers:
 
         self.evaluation_results = results
         logger.info(f"Best evaluated model: {results[0]}")
+        self.model_metrics = results[0].all_scores
         return results[0].model
 
     def get_model_comparison(self) -> pd.DataFrame:
@@ -457,9 +427,6 @@ class KeyInfluencers:
 
         self.model_pipeline.fit(X, y)
         self.tree_pipeline.fit(X, y)
-
-        # TODO: This step should be performed inside the select best model
-        self.model_metrics = self._evaluate_model_performance(X, y)
 
         self.transformed_feature_names = self.model_pipeline.named_steps[
             "preprocessor"
