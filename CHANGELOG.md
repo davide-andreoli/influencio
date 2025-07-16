@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2
+
+### Features
+
+- Improved model evaluation, autoselect metrics
+
 ## 0.1.1
 
 ### Features
