@@ -1,9 +1,6 @@
 import pandas as pd
 import numpy as np
 from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.compose import ColumnTransformer
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.base import ClassifierMixin, RegressorMixin
 from sklearn.exceptions import NotFittedError
@@ -21,6 +18,7 @@ from .tree import (
 from .evaluator import ModelEvaluator, MetricConfig
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
+from .preprocessor import Preprocessor
 from typing import cast, Optional, Tuple, Dict, Any, List, Union, Literal
 import logging
 
@@ -57,7 +55,7 @@ class KeyInfluencers:
         self.dataframe = dataframe
         self.target = target
 
-        self.preprocessor: Optional[ColumnTransformer] = None
+        self.preprocessor = Preprocessor()
         self.tuning: bool = tuning
         self.tuning_candidates: Optional[
             Dict[str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]]
@@ -361,49 +359,6 @@ class KeyInfluencers:
 
         self._validate_data(X, y)
 
-        categorical_columns = [
-            column
-            for column in X.columns
-            if self._determine_column_type(cast(pd.Series, X[column]))
-            == ColumnType.CATEGORICAL
-        ]
-        # time_columns = [
-        #    column
-        #    for column in X.columns
-        #    if self._determine_column_type(X[column]) == ColumnType.TIME
-        # ]
-        numerical_columns = [
-            column
-            for column in X.columns
-            if self._determine_column_type(cast(pd.Series, X[column]))
-            == ColumnType.NUMERICAL
-        ]
-
-        categorical_pipeline = Pipeline(
-            [
-                ("imputer", SimpleImputer(strategy="most_frequent")),
-                ("onehot", OneHotEncoder(handle_unknown="ignore")),
-            ]
-        )
-
-        numerical_pipeline = Pipeline(
-            [
-                ("imputer", SimpleImputer(strategy="most_frequent")),
-                ("scaler", StandardScaler()),
-            ]
-        )
-
-        # TODO: Add preprocessor for time data
-        # TODO: Maybe add a feature selection step in the pipeline
-        preprocessor = ColumnTransformer(
-            [
-                ("categorical", categorical_pipeline, categorical_columns),
-                ("numerical", numerical_pipeline, numerical_columns),
-            ]
-        )
-
-        self.preprocessor = preprocessor
-
         self.target_type = self._determine_column_type(y)
 
         # X_train, X_test, y_train, y_test = train_test_split(X, y)
@@ -418,11 +373,11 @@ class KeyInfluencers:
         predictor = self._select_best_model(X, y, self.target_type)
 
         self.model_pipeline = Pipeline(
-            [("preprocessor", preprocessor), ("predictor", predictor)]
+            [("preprocessor", self.preprocessor), ("predictor", predictor)]
         )
 
         self.tree_pipeline = Pipeline(
-            [("preprocessor", preprocessor), ("tree", tree_predictor)]
+            [("preprocessor", self.preprocessor), ("tree", tree_predictor)]
         )
 
         self.model_pipeline.fit(X, y)

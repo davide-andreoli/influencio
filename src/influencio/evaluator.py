@@ -1,10 +1,10 @@
 from .data_classes import MetricConfig, ModelEvaluationResult
 from .enums import MetricType, DataCharacteristic
+from .preprocessor import Preprocessor
 from typing import cast, Optional, List, Literal, Dict, Any, Tuple, Union
 import pandas as pd
 import numpy as np
 from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import cross_validate, RandomizedSearchCV
 import logging
 from sklearn.base import ClassifierMixin, RegressorMixin
@@ -272,7 +272,7 @@ class ModelEvaluator:
                 param_distributions=param_grid,
                 cv=self.cv_folds,
                 scoring=scoring,
-                refit=primary_metric_id,
+                refit=primary_metric_id,  # pyright: ignore[reportArgumentType]
                 n_jobs=-1,
                 random_state=self.random_state,
                 n_iter=10,
@@ -307,7 +307,7 @@ class ModelEvaluator:
         mean_scores, cv_scores, std_scores = self._extract_cv_scores(
             raw_scores=cv_results if tuning else cv_result,  # pyright: ignore [reportArgumentType]
             metric_configs=metrics,
-            best_index=search.best_index_ if tuning and search else None,
+            best_index=cast(int, search.best_index_) if tuning and search else None,
             is_search=tuning,
         )
 
@@ -338,7 +338,7 @@ class ModelEvaluator:
         X: pd.DataFrame,
         y: pd.Series,
         task_type: Literal["classification", "regression"],
-        preprocessor: Optional[ColumnTransformer] = None,
+        preprocessor: Optional[Preprocessor] = None,
         tuning: bool = True,
     ) -> List[ModelEvaluationResult]:
         """Evaluates all candidate models and selects the best one."""
