@@ -46,59 +46,61 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         else:
             raise ValueError(f"Unhandled column type: {column.dtype}")
 
-    def _get_missing_value_imputer(self, column: pd.Series) -> str:
+    def _get_missing_value_imputer(
+        self, column: pd.Series
+    ) -> Union[str, TransformerMixin, None]:
         column_type = self._determine_column_type(column)
-        missing_count = column.isnull().sum()
-        missing_percent = missing_count / len(column) * 100
+        missing_percent = column.isnull().sum() / len(column) * 100
 
         if missing_percent == 0:
-            return "none"
+            return None  # no imputing
 
         if missing_percent > self.missing_threshold * 100:
             return "drop_column"
 
         if column_type == ColumnType.CATEGORICAL:
             unique_ratio = column.nunique() / len(column.dropna())
-
-            if unique_ratio > 0.9:  # High cardinality
+            if unique_ratio > 0.9:
                 return "drop_column"
             elif missing_percent < 5:
-                return "mode"
+                return SimpleImputer(strategy="most_frequent")
             else:
-                return "constant"  # Use "missing" as category
+                return SimpleImputer(strategy="constant", fill_value="missing")
 
         elif column_type == ColumnType.NUMERICAL:
             if missing_percent < 5:
-                return "mean"
+                return SimpleImputer(strategy="mean")
             elif missing_percent < 20:
-                return "median"
+                return SimpleImputer(strategy="median")
             else:
-                return "knn"  # More sophisticated for high missing
+                return KNNImputer(n_neighbors=3)
 
-        else:  # TIME
+        elif column_type == ColumnType.TIME:
             if missing_percent < 5:
-                return "forward_fill"
+                return SimpleImputer(
+                    strategy="constant", fill_value=np.nan
+                )  # TODO: replace with forward fill
             else:
                 return "drop_column"
 
-    def _get_scaler(self, column: pd.Series) -> str:
+    def _get_encoder(self, column: pd.Series) -> Optional[TransformerMixin]:
         column_type = self._determine_column_type(column)
-
-        if column_type == ColumnType.NUMERICAL and self.scale_numeric:
-            return "standard"
-        else:
-            return "none"
-
-    def _get_encoder(self, column: pd.Series) -> str:
-        column_type = self._determine_column_type(column)
-
         if column_type == ColumnType.CATEGORICAL:
             if column.nunique() <= self.cardinality_threshold:
-                return "one-hot"
+                return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
             else:
-                return "ordinal"
-        else:
-            return "none"
+                return OrdinalEncoder(
+                    handle_unknown="use_encoded_value", unknown_value=-1
+                )
+        return None
+
+    def _get_scaler(self, column: pd.Series) -> Optional[TransformerMixin]:
+        if (
+            self._determine_column_type(column) == ColumnType.NUMERICAL
+            and self.scale_numeric
+        ):
+            return StandardScaler()
+        return None
 
     def _build_transformers(
         self, X: pd.DataFrame
@@ -106,64 +108,31 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         transformers_dict: Dict[str, Tuple[Any, List[str]]] = {}
 
         for column in X.columns:
-            imputer_strategy = self._get_missing_value_imputer(
-                cast(pd.Series, X[column])
-            )
-            encoder_strategy = self._get_encoder(cast(pd.Series, X[column]))
-            scaler_strategy = self._get_scaler(cast(pd.Series, X[column]))
+            col_series = cast(pd.Series, X[column])
+            imputer = self._get_missing_value_imputer(col_series)
+            encoder = self._get_encoder(col_series)
+            scaler = self._get_scaler(col_series)
 
-            if imputer_strategy == "drop_column":
-                pipeline_key = "drop"
-                if pipeline_key not in transformers_dict:
-                    transformers_dict[pipeline_key] = ("drop", [column])
+            if imputer == "drop_column":
+                if "drop" not in transformers_dict:
+                    transformers_dict["drop"] = ("drop", [column])
                 else:
-                    transformers_dict[pipeline_key][1].append(column)
+                    transformers_dict["drop"][1].append(column)
                 continue
 
             steps = []
+            if imputer is not None:
+                steps.append(("imputer", imputer))
+            if encoder is not None:
+                steps.append(("encoder", encoder))
+            if scaler is not None:
+                steps.append(("scaler", scaler))
 
-            if imputer_strategy == "mean":
-                steps.append(("imputer", SimpleImputer(strategy="mean")))
-            elif imputer_strategy == "median":
-                steps.append(("imputer", SimpleImputer(strategy="median")))
-            elif imputer_strategy == "mode":
-                steps.append(("imputer", SimpleImputer(strategy="most_frequent")))
-            elif imputer_strategy == "constant":
-                steps.append(
-                    (
-                        "imputer",
-                        SimpleImputer(strategy="constant", fill_value="missing"),
-                    )
-                )
-            elif imputer_strategy == "knn":
-                steps.append(("imputer", KNNImputer(n_neighbors=3)))
-            elif imputer_strategy == "forward_fill":
-                steps.append(
-                    ("imputer", SimpleImputer(strategy="constant", fill_value=np.nan))
-                )
-
-            if encoder_strategy == "one-hot":
-                steps.append(
-                    (
-                        "encoder",
-                        OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-                    )
-                )
-            elif encoder_strategy == "ordinal":
-                steps.append(
-                    (
-                        "encoder",
-                        OrdinalEncoder(
-                            handle_unknown="use_encoded_value", unknown_value=-1
-                        ),
-                    )
-                )
-
-            if scaler_strategy == "standard":
-                steps.append(("scaler", StandardScaler()))
+            if not steps:
+                continue
 
             pipeline = Pipeline(steps)
-            pipeline_key = str(steps)
+            pipeline_key = str(pipeline)
 
             if pipeline_key not in transformers_dict:
                 transformers_dict[pipeline_key] = (pipeline, [column])
@@ -171,9 +140,9 @@ class Preprocessor(BaseEstimator, TransformerMixin):
                 transformers_dict[pipeline_key][1].append(column)
 
         transformers = []
-        for idx, (key, (transformer, columns)) in enumerate(transformers_dict.items()):
+        for idx, (key, (transformer, cols)) in enumerate(transformers_dict.items()):
             name = f"pipeline_{idx}" if key != "drop" else "drop_columns"
-            transformers.append((name, transformer, columns))
+            transformers.append((name, transformer, cols))
 
         return transformers
 
