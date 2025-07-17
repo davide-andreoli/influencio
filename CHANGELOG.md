@@ -4,7 +4,8 @@
 
 ### Features
 
-- Improved model evaluation, autoselect metrics
+- Improved model evaluation
+- Improved preprocessing
 
 ## 0.1.1
 
