@@ -9,6 +9,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder
 from .utils import determine_column_type
+from .imputers import ForwardFillImputer
 import logging
 
 logger = logging.getLogger(__name__)
@@ -57,9 +58,22 @@ class Preprocessor(BaseEstimator, TransformerMixin):
 
         elif column_type == ColumnType.TIME:
             if missing_percent < 5:
-                return SimpleImputer(
-                    strategy="constant", fill_value=np.nan
-                )  # TODO: replace with forward fill
+                if (
+                    column.dropna().is_monotonic_increasing
+                    or column.dropna().is_monotonic_decreasing
+                ):
+                    return ForwardFillImputer()
+                elif (
+                    column.dropna().mode().count() > 0
+                    and (
+                        column.dropna().mode().value_counts().iloc[0]
+                        / len(column.dropna())
+                    )
+                    > 0.5
+                ):
+                    return SimpleImputer(strategy="most_frequent")
+                else:
+                    return "drop_column"
             else:
                 return "drop_column"
 
