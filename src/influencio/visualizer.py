@@ -59,8 +59,8 @@ class DataVisualizer:
 
             data = pd.DataFrame(
                 feature_class_importance,
-                columns=class_names,
-                index=feature_names_sorted,
+                columns=class_names,  # pyright: ignore[reportArgumentType]
+                index=feature_names_sorted,  # pyright: ignore[reportArgumentType]
             )
             data = data.reset_index().melt(
                 id_vars="index", var_name="Class", value_name="Importance"
