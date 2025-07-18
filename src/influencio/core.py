@@ -19,6 +19,8 @@ from .evaluator import ModelEvaluator, EvaluationResult
 from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
 from .enums import ColumnType, TreeType
 from .preprocessor import Preprocessor
+from .validator import DataValidator
+from .utils import determine_column_type
 from typing import cast, Optional, Tuple, Dict, Any, List, Union
 import logging
 
@@ -52,6 +54,7 @@ class KeyInfluencers:
         self.target = target
 
         self.preprocessor = Preprocessor()
+        self.validator = DataValidator()
         self.tuning: bool = tuning
         self.tuning_candidates: Optional[
             Dict[str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]]
@@ -82,64 +85,6 @@ class KeyInfluencers:
             )
             self._model_evaluator = ModelEvaluator(task_type=task_type)
         return self._model_evaluator
-
-    def _validate_data(self, X: pd.DataFrame, y: pd.Series):
-        """
-        Validates input data quality and structure.
-
-        Args:
-            X: Feature dataframe
-            y: target series
-
-        Raises:
-            ValueError: if data does not meet the minimum requirements
-        """
-
-        if len(X) < 10:
-            raise ValueError(
-                f"The given dataset is too small: {len(X)}. Please use a dataset containing at least 10 rows"
-            )
-
-        if y.isnull().all():
-            raise ValueError("The target variable contains only null values.")
-
-        if y.isnull().sum() > len(y) * 0.5:
-            logger.warning(
-                f"Target variable has {y.isnull().sum()/len(y)*100:.1f}% missing values."
-            )
-
-        numeric_columns = X.select_dtypes(include=[np.number]).columns
-        low_variance_columns = []
-
-        for col in numeric_columns:
-            if X[col].to_numpy().var() < 1e-10:
-                low_variance_columns.append(col)
-
-        if low_variance_columns:
-            logger.warning(f"Low variance features detected: {low_variance_columns}")
-
-        high_missing_columns = []
-        for col in X.columns:
-            missing_percent = X[col].isnull().sum() / len(X)
-            if missing_percent > 0.8:
-                high_missing_columns.append((col, missing_percent))
-
-        if high_missing_columns:
-            logger.warning(f"Features with >80% missing values: {high_missing_columns}")
-
-        target_type = self._determine_column_type(y)
-        if target_type == ColumnType.CATEGORICAL:
-            unique_values = y.nunique()
-            if unique_values < 2:
-                raise ValueError(
-                    f"Categorical target must have at least 2 classes. Found: {unique_values}"
-                )
-            if unique_values > 50:
-                logger.warning(
-                    f"High cardinality target: {unique_values} classes. Consider grouping to improve performances."
-                )
-
-        logger.info("Data validation completed successfully.")
 
     def _select_best_model(
         self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
@@ -200,9 +145,9 @@ class KeyInfluencers:
         X: pd.DataFrame = self.dataframe.drop(self.target, axis=1)
         y: pd.Series = cast(pd.Series, self.dataframe[self.target])
 
-        self._validate_data(X, y)
+        self.validator.validate_data(X, y)
 
-        self.target_type = self._determine_column_type(y)
+        self.target_type = determine_column_type(y)
 
         # X_train, X_test, y_train, y_test = train_test_split(X, y)
         # TODO: Add automatic model choice based on performance
@@ -302,27 +247,6 @@ class KeyInfluencers:
             and predicted_class_index
             else None,
         )
-
-    def _determine_column_type(self, column: pd.Series) -> ColumnType:
-        """
-        Determines the type of a column based on its data type and unique values.
-        Args:
-            column (pd.Series): The input column to determine the type
-        Returns:
-            ColumnType: The determined type of the column (categorical, numerical, or time)
-        """
-        if (
-            pd.api.types.is_bool_dtype(column)
-            or pd.api.types.is_object_dtype(column)
-            or column.nunique() <= 10  # TODO: Understand if this limit is good
-        ):
-            return ColumnType.CATEGORICAL
-        elif pd.api.types.is_datetime64_any_dtype(column):
-            return ColumnType.TIME  # pragma: no cover
-        elif pd.api.types.is_numeric_dtype(column):
-            return ColumnType.NUMERICAL
-        else:
-            raise ValueError(f"Unhandled column type: {column.dtype}")
 
     def key_segments(
         self, top_n: int = 5, focus_class: Optional[str] = None

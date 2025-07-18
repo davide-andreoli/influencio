@@ -8,6 +8,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder
+from .utils import determine_column_type
 
 
 class Preprocessor(BaseEstimator, TransformerMixin):
@@ -22,34 +23,10 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         self.missing_threshold = missing_threshold
         self.preprocessor: Optional[ColumnTransformer] = None
 
-    def _determine_column_type(self, column: pd.Series) -> ColumnType:
-        """
-        Determines the type of a column based on its data type and unique values.
-        Args:
-            column (pd.Series): The input column to determine the type
-        Returns:
-            ColumnType: The determined type of the column (categorical, numerical, or time)
-        """
-        if (
-            pd.api.types.is_bool_dtype(column)
-            or pd.api.types.is_object_dtype(column)
-            or (
-                pd.api.types.is_numeric_dtype(column)
-                and column.nunique() <= self.cardinality_threshold
-            )
-        ):
-            return ColumnType.CATEGORICAL
-        elif pd.api.types.is_datetime64_any_dtype(column):
-            return ColumnType.TIME
-        elif pd.api.types.is_numeric_dtype(column):
-            return ColumnType.NUMERICAL
-        else:
-            raise ValueError(f"Unhandled column type: {column.dtype}")
-
     def _get_missing_value_imputer(
         self, column: pd.Series
     ) -> Union[str, TransformerMixin, None]:
-        column_type = self._determine_column_type(column)
+        column_type = determine_column_type(column, self.cardinality_threshold)
         missing_percent = column.isnull().sum() / len(column) * 100
 
         if missing_percent == 0:
@@ -84,7 +61,7 @@ class Preprocessor(BaseEstimator, TransformerMixin):
                 return "drop_column"
 
     def _get_encoder(self, column: pd.Series) -> Optional[TransformerMixin]:
-        column_type = self._determine_column_type(column)
+        column_type = determine_column_type(column, self.cardinality_threshold)
         if column_type == ColumnType.CATEGORICAL:
             if column.nunique() <= self.cardinality_threshold:
                 return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
@@ -96,7 +73,8 @@ class Preprocessor(BaseEstimator, TransformerMixin):
 
     def _get_scaler(self, column: pd.Series) -> Optional[TransformerMixin]:
         if (
-            self._determine_column_type(column) == ColumnType.NUMERICAL
+            determine_column_type(column, self.cardinality_threshold)
+            == ColumnType.NUMERICAL
             and self.scale_numeric
         ):
             return StandardScaler()
