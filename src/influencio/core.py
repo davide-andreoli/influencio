@@ -5,19 +5,16 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.exceptions import NotFittedError
 from shap import Explainer
 from shap._explanation import Explanation
-from .tree import (
-    extract_feature_contributions,
-    extract_tree_rules,
-    extract_tree_insights,
-)
 from .evaluator import ModelEvaluator
-from .enums import ColumnType, TreeType
+from .enums import ColumnType
 from .preprocessor import Preprocessor
 from .validator import DataValidator
 from .selector import ModelSelector
 from .utils import determine_column_type
 from .visualizer import DataVisualizer
-from typing import cast, Optional, Tuple, Any, List, Union, Literal
+from .explainer import ExplanationGenerator
+from .tree import TreeInsightsExtractor
+from typing import cast, Optional, Tuple, Any, List, Literal
 import logging
 
 logger = logging.getLogger(__name__)
@@ -70,15 +67,14 @@ class KeyInfluencers:
         )
         self.data_visualizer = DataVisualizer()
         self.tree_depth = tree_depth
-
         self.model_pipeline: Optional[Pipeline] = None
         self.tree_pipeline: Optional[Pipeline] = None
+        self.explainer_generator: Optional[ExplanationGenerator] = None
         self.explainer: Optional[Explainer] = None
         self.class_names: Optional[List[str]] = None
         self.input_feature_names: List[str] = cast(
             List[str], dataframe.drop(target, axis=1).columns.to_list()
         )
-        self.transformed_feature_names: Optional[List[str]] = None
         self.shap_values: Optional[Explanation] = None
 
     def fit(self) -> None:
@@ -118,9 +114,6 @@ class KeyInfluencers:
         self.model_pipeline.fit(X, y)
         self.tree_pipeline.fit(X, y)
 
-        self.transformed_feature_names = self.model_pipeline.named_steps[
-            "preprocessor"
-        ].get_feature_names_out()
         if self.task == "classification":
             self.class_names = self.model_pipeline.named_steps[
                 "predictor"
@@ -128,15 +121,21 @@ class KeyInfluencers:
         else:
             self.class_names = None
 
-        self.explainer = Explainer(
-            lambda X: self.model_pipeline.predict_proba(X)  # pyright: ignore[reportOptionalMemberAccess]
-            if self.task == "classification"
-            else self.model_pipeline.predict(X),  # pyright: ignore[reportOptionalMemberAccess]
-            X,
-            feature_names=self.input_feature_names,
-            output_names=self.class_names,
+        self.explainer_generator = ExplanationGenerator(
+            pipeline=self.model_pipeline,
+            task=self.task,
+            class_names=self.class_names,
+            input_feature_names=self.input_feature_names,
         )
-        self.shap_values = self.explainer(X)
+
+        self.explainer, self.shap_values = self.explainer_generator.create_explainer(X)
+        self.tree_insights_extractor = TreeInsightsExtractor(
+            tree_pipeline=self.tree_pipeline,
+            task=self.task,
+            dataframe=self.dataframe,
+            target=self.target,
+            class_names=self.class_names,
+        )
 
     def global_feature_importance(self, max_display: int = 10) -> None:
         """
@@ -199,52 +198,11 @@ class KeyInfluencers:
     def key_segments(
         self, top_n: int = 5, focus_class: Optional[str] = None
     ) -> Tuple[Any, Any, Any]:
-        if not self.tree_pipeline or self.transformed_feature_names is None:
+        if not self.tree_pipeline:
             raise NotFittedError(
                 "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
             )
 
-        tree = cast(
-            Union[DecisionTreeClassifier, DecisionTreeRegressor], self.tree_pipeline[-1]
+        return self.tree_insights_extractor.key_segments(
+            top_n=top_n, focus_class=focus_class
         )
-
-        if self.task == "classification":
-            y = self.dataframe[self.target]
-            class_counts = y.value_counts()
-
-            if focus_class is None:
-                focus_class = cast(str, class_counts.idxmax())
-
-            focus_class_index = self.class_names.index(focus_class)  # pyright: ignore [reportOptionalMemberAccess]
-            overall_mean = (y == focus_class).mean()
-
-            feature_contributions = extract_feature_contributions(
-                tree, self.transformed_feature_names
-            )
-            rules = extract_tree_rules(tree, self.transformed_feature_names)
-            insights = extract_tree_insights(
-                tree,
-                self.transformed_feature_names,
-                overall_mean,
-                TreeType.CLASSIFICATION,
-                top_n=top_n,
-                focus_class_index=focus_class_index,
-                focus_class=focus_class,
-            )
-        else:
-            y = self.dataframe[self.target]
-            overall_mean = cast(float, y.mean())
-            feature_contributions = extract_feature_contributions(
-                tree, self.transformed_feature_names
-            )
-            rules = extract_tree_rules(tree, self.transformed_feature_names)
-            insights = extract_tree_insights(
-                tree,
-                self.transformed_feature_names,
-                overall_mean,
-                TreeType.REGRESSION,
-                top_n=top_n,
-                target=self.target,
-            )
-
-        return feature_contributions, rules, insights
