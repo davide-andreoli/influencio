@@ -5,10 +5,6 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.exceptions import NotFittedError
 from shap import Explainer
 from shap._explanation import Explanation
-from .visualizations import (
-    plot_global_feature_importance,
-    plot_local_feature_importance,
-)
 from .tree import (
     extract_feature_contributions,
     extract_tree_rules,
@@ -20,6 +16,7 @@ from .preprocessor import Preprocessor
 from .validator import DataValidator
 from .selector import ModelSelector
 from .utils import determine_column_type
+from .visualizer import DataVisualizer
 from typing import cast, Optional, Tuple, Any, List, Union, Literal
 import logging
 
@@ -71,6 +68,7 @@ class KeyInfluencers:
             tuning=auto_tune,
             task=self.task,
         )
+        self.data_visualizer = DataVisualizer()
         self.tree_depth = tree_depth
 
         self.model_pipeline: Optional[Pipeline] = None
@@ -152,9 +150,8 @@ class KeyInfluencers:
                 "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
             )
 
-        plot_global_feature_importance(
+        self.data_visualizer.plot_global_feature_importance(
             self.shap_values,
-            max_display=max_display,
             feature_names=self.input_feature_names,
             class_names=self.class_names,
             target_type=ColumnType.CATEGORICAL
@@ -179,6 +176,7 @@ class KeyInfluencers:
 
         predicted_class_index = None
 
+        # TODO: maybe move this inside plot_local_feature_importance
         if self.task == "classification":
             predicted_probabilities = self.model_pipeline.predict_proba(  # pyright: ignore[reportOptionalMemberAccess]
                 self.dataframe.drop(self.target, axis=1).iloc[index : index + 1]
@@ -188,9 +186,8 @@ class KeyInfluencers:
         else:
             shap_values = self.shap_values.values[index]
 
-        plot_local_feature_importance(
+        self.data_visualizer.plot_local_feature_importance(
             shap_values,
-            max_display=max_display,
             feature_names=self.input_feature_names,
             class_name=self.class_names[predicted_class_index]
             if self.task == "classification"

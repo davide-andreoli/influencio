@@ -9,6 +9,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder
 from .utils import determine_column_type
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Preprocessor(BaseEstimator, TransformerMixin):

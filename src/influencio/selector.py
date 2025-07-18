@@ -70,5 +70,5 @@ class ModelSelector:
 
         self.evaluation_results = results
         self.best_result = self.evaluation_results[0]
-        logger.info(f"Best model selected: {self.best_result.model}")
+        logger.info(f"Best model selected: {self.best_result}")
         return self.best_result.model
