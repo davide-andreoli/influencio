@@ -1,5 +1,5 @@
 from sklearn.tree import _tree, DecisionTreeClassifier, DecisionTreeRegressor  # pyright: ignore[reportAttributeAccessIssue]
-from typing import Union, List, Optional, Tuple, Any, cast
+from typing import Union, List, Optional, Tuple, Any, cast, Literal
 from .enums import TreeType
 from sklearn.exceptions import NotFittedError
 from sklearn.pipeline import Pipeline
@@ -50,7 +50,7 @@ class TreeInsightsExtractor:
     def __init__(
         self,
         tree_pipeline: Pipeline,
-        task: str,
+        task: Literal["classification", "regression"],
         dataframe,
         target,
         class_names: Optional[List[str]] = None,

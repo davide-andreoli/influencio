@@ -25,7 +25,9 @@ class KeyInfluencers:
         self,
         dataframe: pd.DataFrame,
         target: str,
-        task: Optional[str] = None,  # 'classification' or 'regression'
+        task: Optional[
+            Literal["classification", "regression"]
+        ] = None,  # 'classification' or 'regression'
         auto_tune: bool = True,
         model: Optional[Any] = None,
         tree_depth: int = 3,
@@ -123,7 +125,7 @@ class KeyInfluencers:
 
         self.explainer_generator = ExplanationGenerator(
             pipeline=self.model_pipeline,
-            task=self.task,
+            task=cast(Literal["classification", "regression"], self.task),
             class_names=self.class_names,
             input_feature_names=self.input_feature_names,
         )
@@ -131,7 +133,7 @@ class KeyInfluencers:
         self.explainer, self.shap_values = self.explainer_generator.create_explainer(X)
         self.tree_insights_extractor = TreeInsightsExtractor(
             tree_pipeline=self.tree_pipeline,
-            task=self.task,
+            task=cast(Literal["classification", "regression"], self.task),
             dataframe=self.dataframe,
             target=self.target,
             class_names=self.class_names,

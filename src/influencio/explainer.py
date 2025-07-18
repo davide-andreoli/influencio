@@ -1,7 +1,7 @@
 from shap import Explainer, Explanation
 from sklearn.pipeline import Pipeline
 import pandas as pd
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Literal
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ class ExplanationGenerator:
     def __init__(
         self,
         pipeline: Pipeline,
-        task: str,
+        task: Literal["classification", "regression"],
         class_names: Optional[List[str]] = None,
         input_feature_names: Optional[List[str]] = None,
     ):
