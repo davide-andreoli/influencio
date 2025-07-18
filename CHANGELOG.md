@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2
+
+### Features
+
+- Improved model evaluation
+- Improved preprocessing
+- Simplified the initializer
+
+### Misc
+
+- Refactored code for better expandability
+
 ## 0.1.1
 
 ### Features
