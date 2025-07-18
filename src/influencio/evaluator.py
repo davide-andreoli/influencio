@@ -141,6 +141,7 @@ class ModelEvaluator:
                     score_stds[metric] = np.std(test_scores)
 
             else:
+                print("BBBB")
                 cv_results = cross_validate(
                     pipeline,  # pyright: ignore[reportArgumentType]
                     X,

@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 from sklearn.pipeline import Pipeline
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.base import ClassifierMixin, RegressorMixin
 from sklearn.exceptions import NotFittedError
 from shap import Explainer
 from shap._explanation import Explanation
@@ -15,13 +14,13 @@ from .tree import (
     extract_tree_rules,
     extract_tree_insights,
 )
-from .evaluator import ModelEvaluator, EvaluationResult
-from .candidates import CLASSIFICATION_CANDIDATES, REGRESSION_CANDIDATES
+from .evaluator import ModelEvaluator
 from .enums import ColumnType, TreeType
 from .preprocessor import Preprocessor
 from .validator import DataValidator
+from .selector import ModelSelector
 from .utils import determine_column_type
-from typing import cast, Optional, Tuple, Dict, Any, List, Union
+from typing import cast, Optional, Tuple, Any, List, Union, Literal
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,12 +31,10 @@ class KeyInfluencers:
         self,
         dataframe: pd.DataFrame,
         target: str,
-        model: Optional[Union[ClassifierMixin, RegressorMixin]] = None,
-        tree_model: Optional[Union[ClassifierMixin, RegressorMixin]] = None,
-        tuning: bool = True,
-        tuning_candidates: Optional[
-            Dict[str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]]
-        ] = None,
+        task: Optional[str] = None,  # 'classification' or 'regression'
+        auto_tune: bool = True,
+        model: Optional[Any] = None,
+        tree_depth: int = 3,
     ):
         """
         KeyInfluencers is a class that provides methods to analyze and visualize the key influencers of a target variable in a dataset.
@@ -52,15 +49,30 @@ class KeyInfluencers:
 
         self.dataframe = dataframe
         self.target = target
-
+        self.task = (
+            task
+            if task
+            else (
+                "classification"
+                if determine_column_type(cast(pd.Series, self.dataframe[self.target]))
+                == ColumnType.CATEGORICAL
+                else "regression"
+            )
+        )
         self.preprocessor = Preprocessor()
         self.validator = DataValidator()
-        self.tuning: bool = tuning
-        self.tuning_candidates: Optional[
-            Dict[str, Tuple[Union[ClassifierMixin, RegressorMixin], Dict[str, Any]]]
-        ] = tuning_candidates
-        self.model: Optional[Union[ClassifierMixin, RegressorMixin]] = model
-        self.tree_model: Optional[Union[ClassifierMixin, RegressorMixin]] = tree_model
+        self.model_evaluator = ModelEvaluator(
+            task_type=cast(Literal["classification", "regression"], self.task)
+        )
+        self.model_selector = ModelSelector(
+            evaluator=self.model_evaluator,
+            preprocessor=self.preprocessor,
+            user_model=model,
+            tuning=auto_tune,
+            task=self.task,
+        )
+        self.tree_depth = tree_depth
+
         self.model_pipeline: Optional[Pipeline] = None
         self.tree_pipeline: Optional[Pipeline] = None
         self.explainer: Optional[Explainer] = None
@@ -70,64 +82,6 @@ class KeyInfluencers:
         )
         self.transformed_feature_names: Optional[List[str]] = None
         self.shap_values: Optional[Explanation] = None
-        self.target_type: Optional[ColumnType] = None
-        self.model_metrics: Optional[EvaluationResult] = None
-        self._model_evaluator: Optional[ModelEvaluator] = None
-        self.evaluation_results: Optional[List] = None
-
-    @property
-    def model_evaluator(self) -> ModelEvaluator:
-        if not self._model_evaluator:
-            task_type = (
-                "classification"
-                if self.target_type == ColumnType.CATEGORICAL
-                else "regression"
-            )
-            self._model_evaluator = ModelEvaluator(task_type=task_type)
-        return self._model_evaluator
-
-    def _select_best_model(
-        self, X: pd.DataFrame, y: pd.Series, target_type: ColumnType
-    ) -> Union[ClassifierMixin, RegressorMixin]:
-        """
-        Selects the best model for the given target type (classification or regression) based on cross-validation scores between a set of candidate models and parameter grids.
-        Args:
-            X (pd.DataFrame): The input features.
-            y (pd.Series): The target variable.
-            target_type (ColumnType): The type of the target variable (categorical or numerical).
-            tuning (bool): Whether to perform hyperparameter tuning using RandomizedSearchCV.
-        Returns:
-            Union[ClassifierMixin, RegressorMixin]: The best model selected based on cross-validation scores and hyperparameter tuning.
-        """
-        if self.model is not None:
-            logger.info("Using user provided model for prediction.")
-            self.model_metrics = self.model_evaluator.evaluate_single_model(
-                self.model, "user_provided_model", X, y
-            )
-            return self.model
-
-        candidates = (
-            (
-                CLASSIFICATION_CANDIDATES
-                if target_type == ColumnType.CATEGORICAL
-                else REGRESSION_CANDIDATES
-            )
-            if not self.tuning_candidates
-            else self.tuning_candidates
-        )
-
-        results = self.model_evaluator.evaluate_multiple_models(
-            models=candidates,
-            X=X,
-            y=y,
-            preprocessor=self.preprocessor,
-            tune_hyperparameters=self.tuning,
-        )
-
-        self.evaluation_results = results
-        logger.info(f"Best evaluated model: {results[0]}")
-        self.model_metrics = results[0]
-        return results[0].model
 
     def fit(self) -> None:
         """
@@ -147,18 +101,13 @@ class KeyInfluencers:
 
         self.validator.validate_data(X, y)
 
-        self.target_type = determine_column_type(y)
-
         # X_train, X_test, y_train, y_test = train_test_split(X, y)
-        # TODO: Add automatic model choice based on performance
-        if self.target_type == ColumnType.CATEGORICAL and not self.tree_model:
-            tree_predictor = DecisionTreeClassifier(max_depth=3)
-        elif self.target_type == ColumnType.NUMERICAL and not self.tree_model:
-            tree_predictor = DecisionTreeRegressor(max_depth=3)
+        if self.task == "classification":
+            tree_predictor = DecisionTreeClassifier(max_depth=self.tree_depth)
         else:
-            tree_predictor = self.tree_model
+            tree_predictor = DecisionTreeRegressor(max_depth=self.tree_depth)
 
-        predictor = self._select_best_model(X, y, self.target_type)
+        predictor = self.model_selector.select_best_model(X, y)
 
         self.model_pipeline = Pipeline(
             [("preprocessor", self.preprocessor), ("predictor", predictor)]
@@ -174,7 +123,7 @@ class KeyInfluencers:
         self.transformed_feature_names = self.model_pipeline.named_steps[
             "preprocessor"
         ].get_feature_names_out()
-        if self.target_type == ColumnType.CATEGORICAL:
+        if self.task == "classification":
             self.class_names = self.model_pipeline.named_steps[
                 "predictor"
             ].classes_.tolist()
@@ -183,7 +132,7 @@ class KeyInfluencers:
 
         self.explainer = Explainer(
             lambda X: self.model_pipeline.predict_proba(X)  # pyright: ignore[reportOptionalMemberAccess]
-            if self.target_type == ColumnType.CATEGORICAL
+            if self.task == "classification"
             else self.model_pipeline.predict(X),  # pyright: ignore[reportOptionalMemberAccess]
             X,
             feature_names=self.input_feature_names,
@@ -208,7 +157,9 @@ class KeyInfluencers:
             max_display=max_display,
             feature_names=self.input_feature_names,
             class_names=self.class_names,
-            target_type=self.target_type,
+            target_type=ColumnType.CATEGORICAL
+            if self.task == "classification"
+            else ColumnType.NUMERICAL,
         )
 
     def local_feature_importance(self, index: int, max_display: int = 10) -> None:
@@ -228,7 +179,7 @@ class KeyInfluencers:
 
         predicted_class_index = None
 
-        if self.target_type == ColumnType.CATEGORICAL:
+        if self.task == "classification":
             predicted_probabilities = self.model_pipeline.predict_proba(  # pyright: ignore[reportOptionalMemberAccess]
                 self.dataframe.drop(self.target, axis=1).iloc[index : index + 1]
             )
@@ -242,7 +193,7 @@ class KeyInfluencers:
             max_display=max_display,
             feature_names=self.input_feature_names,
             class_name=self.class_names[predicted_class_index]
-            if self.target_type == ColumnType.CATEGORICAL
+            if self.task == "classification"
             and self.class_names is not None
             and predicted_class_index
             else None,
@@ -260,7 +211,7 @@ class KeyInfluencers:
             Union[DecisionTreeClassifier, DecisionTreeRegressor], self.tree_pipeline[-1]
         )
 
-        if self.target_type == ColumnType.CATEGORICAL:
+        if self.task == "classification":
             y = self.dataframe[self.target]
             class_counts = y.value_counts()
 
