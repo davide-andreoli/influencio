@@ -1,8 +1,7 @@
 from shap import Explainer, Explanation
 from sklearn.pipeline import Pipeline
 import pandas as pd
-import numpy as np
-from typing import Optional, Tuple, Union, Callable, List, Iterable, Any
+from typing import Optional, Tuple, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,18 +32,6 @@ class ExplanationGenerator:
         self.class_names = class_names
         self.input_feature_names = input_feature_names
 
-    def _get_prediction_function(
-        self,
-    ) -> Callable[
-        [Union[pd.DataFrame, np.ndarray, Iterable[Any], List[str]]],
-        Union[np.ndarray, Tuple[np.ndarray, np.ndarray]],
-    ]:
-        """Returns a prediction function compatible with SHAP."""
-        if self.task == "classification":
-            return self.pipeline.predict_proba
-        else:
-            return self.pipeline.predict
-
     def create_explainer(self, X: pd.DataFrame) -> Tuple[Explainer, Explanation]:
         """
         Creates a SHAP explainer and computes SHAP values for the dataset X.
@@ -55,11 +42,12 @@ class ExplanationGenerator:
         Returns:
             Tuple[Explainer, Explanation]: A fitted SHAP explainer and SHAP values.
         """
-        predict_fn = self._get_prediction_function()
 
         explainer = Explainer(
-            model=predict_fn,
-            data=X,
+            lambda X: self.pipeline.predict_proba(X)  # pyright: ignore[reportOptionalMemberAccess]
+            if self.task == "classification"
+            else self.pipeline.predict(X),
+            X,
             feature_names=self.input_feature_names,
             output_names=self.class_names,
         )
