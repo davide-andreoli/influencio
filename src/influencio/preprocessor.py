@@ -180,7 +180,6 @@ class Preprocessor(BaseEstimator, TransformerMixin):
 
         transformers = self._build_transformers(cast(pd.DataFrame, X))
 
-        # Create the final ColumnTransformer
         if transformers:
             self.preprocessor = ColumnTransformer(transformers)
             self.preprocessor.fit(X)

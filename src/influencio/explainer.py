@@ -42,16 +42,27 @@ class ExplanationGenerator:
         Returns:
             Tuple[Explainer, Explanation]: A fitted SHAP explainer and SHAP values.
         """
+        preprocessor = self.pipeline.named_steps["preprocessor"]
+        predictor = self.pipeline.named_steps["predictor"]
 
+        X_transformed = preprocessor.transform(X)
+
+        def model_on_transformed(X_transformed_input):
+            return (
+                predictor.predict_proba(X_transformed_input)
+                if self.task == "classification"
+                else predictor.predict(X_transformed_input)
+            )
+
+        # TODO: Understand why class names are not passed to the explainer
+        # TODO: Chose the right explainer based on model
         explainer = Explainer(
-            lambda X: self.pipeline.predict_proba(X)  # pyright: ignore[reportOptionalMemberAccess]
-            if self.task == "classification"
-            else self.pipeline.predict(X),
-            X,
-            feature_names=self.input_feature_names,
+            model_on_transformed,
+            X_transformed,
+            feature_names=preprocessor.get_feature_names_out(self.input_feature_names),
             output_names=self.class_names,
         )
 
-        shap_values = explainer(X)
+        shap_values = explainer(X_transformed)
 
         return explainer, shap_values

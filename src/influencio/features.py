@@ -61,6 +61,8 @@ class DatetimeFeatureExtractor(BaseEstimator, TransformerMixin):
         else:
             X = X.copy()
 
+        columns_to_drop = []
+
         for col in X.columns:
             if self.extract_year:
                 X[f"{col}_year"] = X[col].dt.year
@@ -112,7 +114,9 @@ class DatetimeFeatureExtractor(BaseEstimator, TransformerMixin):
                 X[f"{col}_is_month_start"] = X[col].dt.is_month_start.astype(int)
 
             if self.drop_original:
-                X = X.drop(columns=[col])
+                columns_to_drop.append(col)
+
+        X.drop(columns=columns_to_drop, inplace=True)
 
         return X
 
@@ -180,12 +184,13 @@ class DatetimeOrdinalEncoder(BaseEstimator, TransformerMixin):
         self.unit = unit
         self.reference_date = reference_date
         self.reference_dates_ = {}
-        self.datetime_columns_ = []
 
     def fit(self, X: Union[pd.DataFrame, np.ndarray], y=None):
         """Fit the encoder."""
         if isinstance(X, np.ndarray):
             X = pd.DataFrame(X)
+
+        self.feature_names_in_ = X.columns.to_list()
 
         for col in X.columns:
             col_data = X[col].copy()
@@ -193,7 +198,6 @@ class DatetimeOrdinalEncoder(BaseEstimator, TransformerMixin):
                 self.reference_dates_[col] = pd.to_datetime(self.reference_date)
             else:
                 self.reference_dates_[col] = col_data.min()
-
         return self
 
     def transform(self, X: Union[pd.DataFrame, np.ndarray]) -> pd.DataFrame:
@@ -203,18 +207,23 @@ class DatetimeOrdinalEncoder(BaseEstimator, TransformerMixin):
         else:
             X = X.copy()
 
-        for col in X.columns:
-            col_data = X[col].copy()
+        for column in X.columns:
+            column_data = X[column].copy()
 
-            time_diff = col_data - self.reference_dates_[col]
+            time_diff = column_data - self.reference_dates_[column]
 
             if self.unit == "days":
-                X[col] = time_diff.dt.total_seconds() / (24 * 3600)
+                X[column] = time_diff.dt.total_seconds() / (24 * 3600)
             elif self.unit == "seconds":
-                X[col] = time_diff.dt.total_seconds()
+                X[column] = time_diff.dt.total_seconds()
             else:
                 raise ValueError(
                     f"Unit '{self.unit}' not supported. Use 'days' or 'seconds'."
                 )
-
         return X
+
+    def get_feature_names_out(self, input_features=None):
+        """Return output feature names."""
+        if input_features is None:
+            return np.array(self.feature_names_in_)
+        return np.array(input_features)

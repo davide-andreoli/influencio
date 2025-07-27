@@ -150,11 +150,10 @@ class KeyInfluencers:
             raise NotFittedError(
                 "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
             )
-
         self.data_visualizer.plot_global_feature_importance(
             self.shap_values,
-            feature_names=self.input_feature_names,
-            class_names=self.class_names,
+            feature_names=self.explainer.feature_names,
+            class_names=self.explainer.output_names,
             target_type=ColumnType.CATEGORICAL
             if self.task == "classification"
             else ColumnType.NUMERICAL,
@@ -177,6 +176,7 @@ class KeyInfluencers:
 
         predicted_class_index = None
 
+        # TODO: Make sure this makes sense with new logic
         # TODO: maybe move this inside plot_local_feature_importance
         if self.task == "classification":
             predicted_probabilities = self.model_pipeline.predict_proba(  # pyright: ignore[reportOptionalMemberAccess]
@@ -189,7 +189,7 @@ class KeyInfluencers:
 
         self.data_visualizer.plot_local_feature_importance(
             shap_values,
-            feature_names=self.input_feature_names,
+            feature_names=self.explainer.feature_names,
             class_name=self.class_names[predicted_class_index]
             if self.task == "classification"
             and self.class_names is not None
