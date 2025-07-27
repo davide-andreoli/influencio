@@ -9,7 +9,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder
 from .utils import determine_column_type
-from .imputers import ForwardFillImputer
+from .imputers import InterpolateImputer
+from .features import DatetimeFeatureExtractor, DatetimeOrdinalEncoder
 import logging
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ class Preprocessor(BaseEstimator, TransformerMixin):
                     column.dropna().is_monotonic_increasing
                     or column.dropna().is_monotonic_decreasing
                 ):
-                    return ForwardFillImputer()
+                    return InterpolateImputer()
                 elif (
                     column.dropna().mode().count() > 0
                     and (
@@ -73,7 +74,7 @@ class Preprocessor(BaseEstimator, TransformerMixin):
                 ):
                     return SimpleImputer(strategy="most_frequent")
                 else:
-                    return "drop_column"
+                    return SimpleImputer(strategy="median")
             else:
                 return "drop_column"
 
@@ -97,6 +98,33 @@ class Preprocessor(BaseEstimator, TransformerMixin):
             return StandardScaler()
         return None
 
+    def _get_time_transformer(self, column: pd.Series) -> Optional[TransformerMixin]:
+        if determine_column_type(column) != ColumnType.TIME:
+            return None
+
+        non_null_column = column.dropna()
+
+        unique_ratio = non_null_column.nunique() / len(non_null_column)
+        if unique_ratio > 0.8:
+            return DatetimeOrdinalEncoder()
+
+        mode_freq_ratio = non_null_column.value_counts(normalize=True).iloc[0]
+        if mode_freq_ratio > 0.05:
+            return DatetimeFeatureExtractor()
+
+        weekday_counts = non_null_column.dt.weekday.value_counts(normalize=True)
+        hour_counts = non_null_column.dt.hour.value_counts(normalize=True)
+        month_counts = non_null_column.dt.month.value_counts(normalize=True)
+
+        weekday_variance = np.var(weekday_counts.to_numpy())
+        hour_variance = np.var(hour_counts.to_numpy())
+        month_variance = np.var(month_counts.to_numpy())
+
+        if weekday_variance > 0.01 or hour_variance > 0.01 or month_variance > 0.01:
+            return DatetimeFeatureExtractor()
+
+        return DatetimeOrdinalEncoder()
+
     def _build_transformers(
         self, X: pd.DataFrame
     ) -> List[Tuple[str, Pipeline, List[str]]]:
@@ -104,9 +132,11 @@ class Preprocessor(BaseEstimator, TransformerMixin):
 
         for column in X.columns:
             col_series = cast(pd.Series, X[column])
+            # TODO: call determine column type here, and pass the column type to the different helpers
             imputer = self._get_missing_value_imputer(col_series)
             encoder = self._get_encoder(col_series)
             scaler = self._get_scaler(col_series)
+            time_transformations = self._get_time_transformer(col_series)
 
             if imputer == "drop_column":
                 if "drop" not in transformers_dict:
@@ -118,6 +148,8 @@ class Preprocessor(BaseEstimator, TransformerMixin):
             steps = []
             if imputer is not None:
                 steps.append(("imputer", imputer))
+            if time_transformations is not None:
+                steps.append(("time_transformations", time_transformations))
             if encoder is not None:
                 steps.append(("encoder", encoder))
             if scaler is not None:
