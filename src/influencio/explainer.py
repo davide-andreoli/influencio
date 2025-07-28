@@ -1,4 +1,4 @@
-from shap import Explainer, Explanation
+from shap import Explainer, Explanation, sample
 from sklearn.pipeline import Pipeline
 import pandas as pd
 from typing import Optional, Tuple, List, Literal
@@ -47,6 +47,13 @@ class ExplanationGenerator:
 
         X_transformed = preprocessor.transform(X)
 
+        background_size = min(100, X_transformed.shape[0])
+        background_data = (
+            sample(X_transformed, background_size)
+            if X_transformed.shape[0] > background_size
+            else X_transformed
+        )
+
         def model_on_transformed(X_transformed_input):
             return (
                 predictor.predict_proba(X_transformed_input)
@@ -54,15 +61,24 @@ class ExplanationGenerator:
                 else predictor.predict(X_transformed_input)
             )
 
-        # TODO: Understand why class names are not passed to the explainer
-        # TODO: Chose the right explainer based on model
         explainer = Explainer(
             model_on_transformed,
-            X_transformed,
+            background_data,
             feature_names=preprocessor.get_feature_names_out(self.input_feature_names),
             output_names=self.class_names,
         )
 
         shap_values = explainer(X_transformed)
+
+        if (
+            getattr(explainer, "output_names", None) is None
+            and self.class_names is not None
+        ):
+            explainer.output_names = self.class_names
+
+        if getattr(explainer, "feature_names", None) is None:
+            explainer.feature_names = preprocessor.get_feature_names_out(
+                self.input_feature_names
+            )
 
         return explainer, shap_values
