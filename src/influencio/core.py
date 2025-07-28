@@ -153,7 +153,7 @@ class KeyInfluencers:
         self.data_visualizer.plot_global_feature_importance(
             self.shap_values,
             feature_names=self.explainer.feature_names,
-            class_names=self.explainer.output_names,
+            class_names=self.class_names,
             target_type=ColumnType.CATEGORICAL
             if self.task == "classification"
             else ColumnType.NUMERICAL,
