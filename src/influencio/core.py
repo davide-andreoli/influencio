@@ -146,7 +146,7 @@ class KeyInfluencers:
             max_display (int): The maximum number of features to display in the plot.
         """
 
-        if not self.shap_values:
+        if self.shap_values is None:
             raise NotFittedError(
                 "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
             )
@@ -169,7 +169,7 @@ class KeyInfluencers:
         if index < 0 or index >= len(self.dataframe):
             raise IndexError("Index out of range for the dataframe.")
 
-        if not self.shap_values:
+        if self.shap_values is None:
             raise NotFittedError(
                 "The KeyInfluencers object should be fitted using .fit() before calling graphing methods."
             )
@@ -193,7 +193,7 @@ class KeyInfluencers:
             class_name=self.class_names[predicted_class_index]
             if self.task == "classification"
             and self.class_names is not None
-            and predicted_class_index
+            and predicted_class_index is not None
             else None,
         )
 
